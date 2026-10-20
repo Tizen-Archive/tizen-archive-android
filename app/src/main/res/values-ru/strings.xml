@@ -19,6 +19,19 @@
     <string name="allow_unknown_title">Разрешите установку приложений</string>
     <string name="allow_unknown_message">Android должен разрешить этому приложению ставить маленькое вспомогательное приложение, которое доставляет каждый пакет на часы. Включите разрешение, вернитесь и нажмите кнопку ещё раз.</string>
     <string name="open_settings">Открыть настройки</string>
+    <string name="tab_install">Установка</string>
+    <string name="tab_watch">На часах (%1$d)</string>
+    <string name="watch_intro">Приложения, которые этот телефон отправил на часы. Удаление вспомогательного приложения просит Galaxy Wearable удалить и приложение на часах, но он делает это не всегда. Приложение не может проверить, что на часах; ориентир — список в Galaxy Wearable.</string>
+    <string name="watch_empty">Пока ничего не отправлено. Вспомогательные приложения, созданные прошлыми версиями приложения, здесь не видны; установите пакет заново, чтобы он появился.</string>
+    <string name="watch_sent">Отправлено %1$s</string>
+    <string name="remove_from_watch">Удалить с часов</string>
+    <string name="remove_title">Удалить «%1$s»?</string>
+    <string name="remove_message">Android удалит вспомогательное приложение, а Galaxy Wearable должен удалить приложение с часов. Так бывает не всегда: после удаления проверьте список приложений в Galaxy Wearable и удалите приложение там, если оно осталось на часах.</string>
+    <string name="remove_working">Подтвердите удаление в окне Android…</string>
+    <string name="remove_failed">Не удалось удалить вспомогательное приложение: %1$s</string>
+    <string name="remove_done_title">Удалено с телефона</string>
+    <string name="remove_done_message">Вспомогательное приложение удалено. Galaxy Wearable должен удалить приложение с часов, но так бывает не всегда: проверьте список приложений в Galaxy Wearable.</string>
+    <string name="open_wearable">Открыть Galaxy Wearable</string>
     <string name="state_queued">Ожидание</string>
     <string name="state_reading">Чтение пакета</string>
     <string name="state_building">Сборка вспомогательного приложения</string>
@@ -48,7 +61,7 @@
     <string name="state_conflict">Вспомогательное приложение для этого пакета установлено с другим ключом. Сначала удалите его в настройках Android (это удалит приложение и с часов), затем повторите.</string>
     <string name="state_failed">Ошибка: %1$s</string>
     <string name="summary">Установлено: %1$d, ошибок: %2$d, отменено: %3$d</string>
-    <string name="wearable_note">Не удаляйте вспомогательные приложения при подключённых часах: вместе с ними с часов удалится и само приложение.</string>
+    <string name="wearable_note">Удаление вспомогательного приложения с телефона может удалить и приложение с часов, но Galaxy Wearable делает это не всегда. Проверьте список приложений в Galaxy Wearable.</string>
     <string name="size_kb">%1$d КБ</string>
     <string name="size_mb">%1$.1f МБ</string>
 </resources>

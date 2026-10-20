@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.IntentSender
 import android.content.pm.PackageInstaller
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
@@ -21,66 +22,114 @@ internal sealed interface InstallOutcome {
     data class Failed(val status: Int, val message: String?) : InstallOutcome
 }
 
-/** Installs one APK through a PackageInstaller session; the system asks the user to confirm. */
+internal sealed interface UninstallOutcome {
+    data object Removed : UninstallOutcome
+
+    /** The user declined the system confirmation. */
+    data object Declined : UninstallOutcome
+
+    data class Failed(val status: Int, val message: String?) : UninstallOutcome
+}
+
+/** The raw result PackageInstaller reports for a session or an uninstall. */
+private class StatusEvent(val status: Int, val message: String?, val packageName: String?)
+
+/** Installs and removes helper apps through PackageInstaller; the system asks the user to confirm. */
 internal class PackageInstallerGateway(private val context: Context) {
     private val counter = AtomicInteger()
 
-    suspend fun install(apk: File): InstallOutcome = suspendCancellableCoroutine { continuation ->
+    suspend fun install(apk: File): InstallOutcome {
         val installer = context.packageManager.packageInstaller
-        val action = "${context.packageName}.INSTALL_RESULT.${counter.incrementAndGet()}"
         val sessionId = installer.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
+        val event = awaitStatus(onCancel = { runCatching { installer.abandonSession(sessionId) } }) { sender, fail ->
+            try {
+                installer.openSession(sessionId).use { session ->
+                    apk.inputStream().use { input ->
+                        session.openWrite("companion.apk", 0, apk.length()).use { output ->
+                            input.copyTo(output, BUFFER)
+                            session.fsync(output)
+                        }
+                    }
+                    session.commit(sender)
+                }
+            } catch (e: Exception) {
+                runCatching { installer.abandonSession(sessionId) }
+                fail(e)
+            }
+        }
+        return when (event.status) {
+            PackageInstaller.STATUS_SUCCESS -> InstallOutcome.Installed(event.packageName.orEmpty())
+            PackageInstaller.STATUS_FAILURE_ABORTED -> InstallOutcome.Declined
+            else -> InstallOutcome.Failed(event.status, event.message)
+        }
+    }
+
+    suspend fun uninstall(packageName: String): UninstallOutcome {
+        val installer = context.packageManager.packageInstaller
+        val event = awaitStatus(onCancel = {}) { sender, fail ->
+            try {
+                installer.uninstall(packageName, sender)
+            } catch (e: Exception) {
+                fail(e)
+            }
+        }
+        return when (event.status) {
+            PackageInstaller.STATUS_SUCCESS -> UninstallOutcome.Removed
+            PackageInstaller.STATUS_FAILURE_ABORTED -> UninstallOutcome.Declined
+            else -> UninstallOutcome.Failed(event.status, event.message)
+        }
+    }
+
+    /**
+     * Runs [start] with an IntentSender that PackageInstaller reports to, shows the system confirmation when it is
+     * asked for, and returns the final status. [start] calls `fail` when it cannot even begin.
+     */
+    private suspend fun awaitStatus(
+        onCancel: () -> Unit,
+        start: (IntentSender, (Exception) -> Unit) -> Unit,
+    ): StatusEvent = suspendCancellableCoroutine { continuation ->
+        val action = "${context.packageName}.INSTALLER_STATUS.${counter.incrementAndGet()}"
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context, intent: Intent) {
                 val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-                val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-                when (status) {
-                    PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                        val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
-                        if (confirm != null) {
-                            context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        } else {
-                            finish(InstallOutcome.Failed(status, "No confirmation screen"))
-                        }
+                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
+                    if (confirm != null) {
+                        context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } else {
+                        finish(StatusEvent(PackageInstaller.STATUS_FAILURE, "No confirmation screen", null))
                     }
-                    PackageInstaller.STATUS_SUCCESS -> {
-                        val name = intent.getStringExtra(PackageInstaller.EXTRA_PACKAGE_NAME).orEmpty()
-                        finish(InstallOutcome.Installed(name))
-                    }
-                    PackageInstaller.STATUS_FAILURE_ABORTED -> finish(InstallOutcome.Declined)
-                    else -> finish(InstallOutcome.Failed(status, message))
+                    return
                 }
+                finish(
+                    StatusEvent(
+                        status,
+                        intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE),
+                        intent.getStringExtra(PackageInstaller.EXTRA_PACKAGE_NAME),
+                    ),
+                )
             }
 
-            private fun finish(outcome: InstallOutcome) {
+            private fun finish(event: StatusEvent) {
                 runCatching { context.unregisterReceiver(this) }
-                if (continuation.isActive) continuation.resume(outcome) { _, _, _ -> }
+                if (continuation.isActive) continuation.resume(event) { _, _, _ -> }
             }
         }
         ContextCompat.registerReceiver(context, receiver, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
         continuation.invokeOnCancellation {
             runCatching { context.unregisterReceiver(receiver) }
-            runCatching { installer.abandonSession(sessionId) }
+            onCancel()
         }
 
-        try {
-            installer.openSession(sessionId).use { session ->
-                apk.inputStream().use { input ->
-                    session.openWrite("companion.apk", 0, apk.length()).use { output ->
-                        input.copyTo(output, BUFFER)
-                        session.fsync(output)
-                    }
-                }
-                val callback = Intent(action).setPackage(context.packageName)
-                val pending = PendingIntent.getBroadcast(
-                    context, sessionId, callback, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-                session.commit(pending.intentSender)
-            }
-        } catch (e: Exception) {
+        val id = counter.incrementAndGet()
+        val callback = Intent(action).setPackage(context.packageName)
+        val pending = PendingIntent.getBroadcast(context, id, callback, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        start(pending.intentSender) { e ->
             runCatching { context.unregisterReceiver(receiver) }
-            runCatching { installer.abandonSession(sessionId) }
-            if (continuation.isActive) continuation.resume(InstallOutcome.Failed(PackageInstaller.STATUS_FAILURE, e.message)) { _, _, _ -> }
+            if (continuation.isActive) {
+                continuation.resume(StatusEvent(PackageInstaller.STATUS_FAILURE, e.message, null)) { _, _, _ -> }
+            }
         }
     }
 

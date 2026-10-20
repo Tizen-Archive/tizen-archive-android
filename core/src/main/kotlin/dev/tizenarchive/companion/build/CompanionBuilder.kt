@@ -19,7 +19,15 @@ public class CompanionBuilder(private val key: SigningKey, private val clock: ()
     public fun build(source: File, outputDir: File): BuiltCompanion {
         val info = TizenPackageReader.read(source)
         val name = CompanionNaming.androidPackageName(info.packageId)
-        val manifest = CompanionManifest(name, versionCode = CompanionNaming.versionCode(clock()))
+        val manifest = CompanionManifest(
+            name,
+            versionCode = CompanionNaming.versionCode(clock()),
+            versionName = info.version?.takeIf { it.isNotBlank() }?.take(MAX_VERSION_NAME) ?: "1.0",
+            label = info.displayName ?: info.packageId,
+            tizenPackageId = info.packageId,
+            tizenVersion = info.version,
+            tizenKind = info.kind.extension,
+        )
 
         outputDir.mkdirs()
         val unsigned = File(outputDir, "$name.unsigned.apk")
@@ -33,5 +41,9 @@ public class CompanionBuilder(private val key: SigningKey, private val clock: ()
             unsigned.delete()
         }
         return BuiltCompanion(signed, name, info)
+    }
+
+    private companion object {
+        const val MAX_VERSION_NAME = 64
     }
 }

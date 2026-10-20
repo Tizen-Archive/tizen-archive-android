@@ -46,4 +46,30 @@ class Aapt2OracleTest {
             assertTrue(output.contains(expected), "missing '$expected' in:\n$output")
         }
     }
+
+    @Test
+    fun `aapt2 accepts the metadata and the marker component`(@TempDir dir: File) {
+        val aapt2 = aapt2()
+        assumeTrue(aapt2 != null, "AAPT2 is not set")
+        val apk = File(dir, "companion.apk")
+        val payload = ByteArray(64) { it.toByte() }
+        apk.outputStream().use {
+            CompanionApk.writeUnsigned(
+                it,
+                CompanionManifest(
+                    "org.example.tizen.c0123456789ab", label = "Example Face",
+                    tizenPackageId = "com.example.face", tizenVersion = "2.0.1", tizenKind = "tpk",
+                ),
+                TizenPackageFile("tpk", payload.size.toLong()) { payload.inputStream() },
+            )
+        }
+        val process = ProcessBuilder(aapt2!!.path, "dump", "xmltree", "--file", "AndroidManifest.xml", apk.path)
+            .redirectErrorStream(true).start()
+        val output = process.inputStream.bufferedReader().readText()
+        assertTrue(process.waitFor(30, TimeUnit.SECONDS))
+        assertEquals(0, process.exitValue(), output)
+        for (expected in listOf("android:label", "Example Face", "E: meta-data", "dev.tizenarchive.companion.TIZEN_PACKAGE_ID", "com.example.face", "E: activity", "E: intent-filter", "dev.tizenarchive.companion.COMPANION")) {
+            assertTrue(output.contains(expected), "missing '$expected' in:\n$output")
+        }
+    }
 }

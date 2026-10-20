@@ -3,11 +3,13 @@ package dev.tizenarchive.companion.ui
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,12 +27,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.tizenarchive.companion.R
 import dev.tizenarchive.companion.catalog.CatalogError
 import dev.tizenarchive.companion.catalog.NotInstallableReason
+import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,16 +61,36 @@ internal fun MainScreen(viewModel: MainViewModel) {
     }
     val context = LocalContext.current
 
+    var tab by rememberSaveable { mutableIntStateOf(TAB_INSTALL) }
+
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
+        topBar = {
+            Column {
+                TopAppBar(title = { Text(stringResource(R.string.app_name)) })
+                PrimaryTabRow(selectedTabIndex = tab) {
+                    Tab(selected = tab == TAB_INSTALL, onClick = { tab = TAB_INSTALL }, text = { Text(stringResource(R.string.tab_install)) })
+                    Tab(
+                        selected = tab == TAB_WATCH,
+                        onClick = { tab = TAB_WATCH },
+                        text = { Text(stringResource(R.string.tab_watch, state.companions.size)) },
+                    )
+                }
+            }
+        },
         bottomBar = {
-            BottomActions(
-                state = state,
-                onInstall = viewModel::installSelected,
-                onCancel = viewModel::cancel,
-            )
+            if (tab == TAB_INSTALL) {
+                BottomActions(
+                    state = state,
+                    onInstall = viewModel::installSelected,
+                    onCancel = viewModel::cancel,
+                )
+            }
         },
     ) { padding ->
+        if (tab == TAB_WATCH) {
+            WatchTab(padding, state.companions, onRemove = viewModel::askRemoval)
+            return@Scaffold
+        }
         // One scrolling list: on a small screen or with a long status text nothing is pushed out of view.
         LazyColumn(
             modifier = Modifier
@@ -116,6 +145,21 @@ internal fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    state.removal?.let { removal ->
+        val wearable = remember { context.packageManager.getLaunchIntentForPackage(GALAXY_WEARABLE) }
+        RemovalDialog(
+            removal,
+            onConfirm = viewModel::confirmRemoval,
+            onDismiss = viewModel::dismissRemoval,
+            onOpenWearable = wearable?.let { intent ->
+                {
+                    context.startActivity(intent)
+                    viewModel.dismissRemoval()
+                }
+            },
+        )
+    }
+
     state.remote?.let { remote ->
         RemoteDialog(remote, onConfirm = viewModel::confirmRemote, onDismiss = viewModel::dismissRemote)
     }
@@ -137,6 +181,84 @@ internal fun MainScreen(viewModel: MainViewModel) {
             },
         )
     }
+}
+
+private const val GALAXY_WEARABLE = "com.samsung.android.app.watchmanager"
+private const val TAB_INSTALL = 0
+private const val TAB_WATCH = 1
+
+@Composable
+private fun WatchTab(padding: PaddingValues, companions: List<InstalledCompanion>, onRemove: (InstalledCompanion) -> Unit) {
+    val context = LocalContext.current
+    LazyColumn(
+        modifier = Modifier
+            .padding(padding)
+            .padding(horizontal = 16.dp)
+            .fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Text(
+                stringResource(R.string.watch_intro),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (companions.isEmpty()) {
+            item { Text(stringResource(R.string.watch_empty), modifier = Modifier.padding(top = 16.dp)) }
+        }
+        items(companions, key = { it.androidPackage }) { companion ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(companion.label, style = MaterialTheme.typography.titleMedium)
+                    val details = listOfNotNull(companion.tizenPackageId, companion.tizenVersion?.let { "v$it" }, companion.kind?.uppercase())
+                    if (details.isNotEmpty()) {
+                        Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    val sent = DateUtils.formatDateTime(context, companion.updatedAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR)
+                    Text(stringResource(R.string.watch_sent, sent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { onRemove(companion) }) { Text(stringResource(R.string.remove_from_watch)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemovalDialog(removal: RemovalState, onConfirm: () -> Unit, onDismiss: () -> Unit, onOpenWearable: (() -> Unit)?) {
+    val companion = when (removal) {
+        is RemovalState.Confirm -> removal.companion
+        is RemovalState.Working -> removal.companion
+        is RemovalState.Done -> removal.companion
+        is RemovalState.Failed -> removal.companion
+    }
+    val working = removal is RemovalState.Working
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(if (removal is RemovalState.Done) R.string.remove_done_title else R.string.remove_title, companion.label)) },
+        text = {
+            Text(
+                when (removal) {
+                    is RemovalState.Confirm -> stringResource(R.string.remove_message)
+                    is RemovalState.Working -> stringResource(R.string.remove_working)
+                    is RemovalState.Done -> stringResource(R.string.remove_done_message)
+                    is RemovalState.Failed -> stringResource(R.string.remove_failed, removal.reason ?: "")
+                },
+            )
+        },
+        confirmButton = {
+            when {
+                removal is RemovalState.Confirm -> TextButton(onClick = onConfirm) { Text(stringResource(R.string.remove_from_watch)) }
+                removal is RemovalState.Done && onOpenWearable != null ->
+                    TextButton(onClick = onOpenWearable) { Text(stringResource(R.string.open_wearable)) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !working) {
+                Text(stringResource(if (removal is RemovalState.Failed || removal is RemovalState.Done) R.string.ok else R.string.cancel))
+            }
+        },
+    )
 }
 
 @Composable
