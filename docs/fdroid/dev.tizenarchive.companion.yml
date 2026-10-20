@@ -6,8 +6,8 @@ License: Apache-2.0
 AuthorName: Tizen Archive
 AuthorEmail: developer@tizen-archive.com
 WebSite: https://tizen-archive.com
-SourceCode: <REPOSITORY_URL>
-IssueTracker: <REPOSITORY_URL>/issues
+SourceCode: https://github.com/Tizen-Archive/tizen-companion-installer
+IssueTracker: https://github.com/Tizen-Archive/tizen-companion-installer/issues
 
 # Galaxy Wearable and Samsung's Gear Plugin (both proprietary) are required for the app to do anything.
 AntiFeatures:
@@ -17,7 +17,7 @@ AntiFeatures:
 AutoName: Tizen Companion Installer
 
 RepoType: git
-Repo: <REPOSITORY_URL>.git
+Repo: https://github.com/Tizen-Archive/tizen-companion-installer.git
 
 Builds:
   - versionName: 0.1.0
