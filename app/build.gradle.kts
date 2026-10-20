@@ -17,6 +17,9 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        // The catalog address is fixed in the app; a link can never change it. Override for local development:
+        // ./gradlew :app:assembleDebug -PcatalogUrl=http://192.168.0.10:8080
+        buildConfigField("String", "CATALOG_URL", "\"${providers.gradleProperty("catalogUrl").orElse("https://tizen-archive.com").get()}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -26,6 +29,10 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
