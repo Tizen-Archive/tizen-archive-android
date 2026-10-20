@@ -88,7 +88,15 @@ internal fun MainScreen(viewModel: MainViewModel) {
         },
     ) { padding ->
         if (tab == TAB_WATCH) {
-            WatchTab(padding, state.companions, onRemove = viewModel::askRemoval)
+            WatchTab(
+                padding,
+                state.companions,
+                states = state.states,
+                installing = state.installing,
+                onResend = viewModel::resend,
+                onCancel = viewModel::cancel,
+                onRemove = viewModel::askRemoval,
+            )
             return@Scaffold
         }
         // One scrolling list: on a small screen or with a long status text nothing is pushed out of view.
@@ -198,7 +206,15 @@ private const val TAB_INSTALL = 0
 private const val TAB_WATCH = 1
 
 @Composable
-private fun WatchTab(padding: PaddingValues, companions: List<InstalledCompanion>, onRemove: (InstalledCompanion) -> Unit) {
+private fun WatchTab(
+    padding: PaddingValues,
+    companions: List<InstalledCompanion>,
+    states: Map<Uri, ItemState>,
+    installing: Boolean,
+    onResend: (InstalledCompanion) -> Unit,
+    onCancel: () -> Unit,
+    onRemove: (InstalledCompanion) -> Unit,
+) {
     val context = LocalContext.current
     LazyColumn(
         modifier = Modifier
@@ -227,7 +243,23 @@ private fun WatchTab(padding: PaddingValues, companions: List<InstalledCompanion
                     }
                     val sent = DateUtils.formatDateTime(context, companion.updatedAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR)
                     Text(stringResource(R.string.watch_sent, sent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedButton(onClick = { onRemove(companion) }) { Text(stringResource(R.string.remove_from_watch)) }
+                    val itemState = states[companionKey(companion.androidPackage)]
+                    if (itemState != null) {
+                        Text(
+                            describe(itemState),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (itemState is ItemState.Failed || itemState is ItemState.SignatureConflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val working = installing && itemState != null && itemState !is ItemState.Installed && itemState !is ItemState.Failed && itemState !is ItemState.Cancelled && itemState !is ItemState.SignatureConflict
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (working) {
+                            OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                        } else {
+                            OutlinedButton(onClick = { onResend(companion) }, enabled = !installing) { Text(stringResource(R.string.resend_to_watch)) }
+                            OutlinedButton(onClick = { onRemove(companion) }, enabled = !installing) { Text(stringResource(R.string.remove_from_watch)) }
+                        }
+                    }
                 }
             }
         }
