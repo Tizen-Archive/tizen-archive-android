@@ -27,6 +27,8 @@ import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.FolderScanner
 import dev.tizenarchive.companion.files.FolderStore
 import dev.tizenarchive.companion.files.PackageFile
+import dev.tizenarchive.companion.files.PackagePreview
+import dev.tizenarchive.companion.files.PreviewLoader
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.PackageInstallerGateway
 import dev.tizenarchive.companion.install.UninstallOutcome
@@ -38,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -101,6 +104,8 @@ internal data class UiState(
     val incomingRejected: Int = 0,
     val query: String = "",
     val selected: Set<Uri> = emptySet(),
+    /** Names, versions and icons read from the packages in the list, filled in the background. */
+    val previews: Map<Uri, PackagePreview> = emptyMap(),
     val states: Map<Uri, ItemState> = emptyMap(),
     val installing: Boolean = false,
     val needsInstallPermission: Boolean = false,
@@ -111,7 +116,16 @@ internal data class UiState(
     val allFiles: List<PackageFile> get() = incoming + files
 
     val visibleFiles: List<PackageFile>
-        get() = if (query.isBlank()) allFiles else allFiles.filter { it.name.contains(query.trim(), ignoreCase = true) }
+        get() {
+            val needle = query.trim()
+            if (needle.isEmpty()) return allFiles
+            return allFiles.filter { file ->
+                val preview = previews[file.uri]
+                file.name.contains(needle, ignoreCase = true) ||
+                    preview?.name?.contains(needle, ignoreCase = true) == true ||
+                    preview?.packageId?.contains(needle, ignoreCase = true) == true
+            }
+        }
 
     val installed: Int get() = states.values.count { it is ItemState.Installed }
     val skipped: Int get() = states.values.count { it is ItemState.AlreadySent }
@@ -131,6 +145,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         allowCleartext = BuildConfig.DEBUG,
     )
     private val workDir = File(application.cacheDir, "work")
+    private val previewLoader = PreviewLoader(application)
+    private var previewJob: Job? = null
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
@@ -269,6 +285,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                     incomingRejected = state.incomingRejected + rejected,
                 )
             }
+            loadPreviews()
         }
     }
 
@@ -390,7 +407,26 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         _state.update { it.copy(scanning = true, files = emptyList(), selected = emptySet(), states = emptyMap()) }
         val name = withContext(Dispatchers.IO) { runCatching { FolderScanner.displayName(context.contentResolver, uri) }.getOrNull() }
         val files = withContext(Dispatchers.IO) { runCatching { FolderScanner.scan(context.contentResolver, uri) }.getOrDefault(emptyList()) }
-        _state.update { it.copy(folderName = name, scanning = false, files = files) }
+        _state.update { it.copy(folderName = name, scanning = false, files = files, previews = emptyMap()) }
+        loadPreviews()
+    }
+
+    /** Reads names and icons of the listed packages one by one in the background; the list updates as they arrive. */
+    private fun loadPreviews() {
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch(Dispatchers.IO) {
+            val pending = _state.value.allFiles.filter { it.uri !in _state.value.previews }.take(MAX_PREVIEWS)
+            val batch = mutableMapOf<Uri, PackagePreview>()
+            for ((index, file) in pending.withIndex()) {
+                ensureActive()
+                runCatching { previewLoader.load(file.uri, file.size) }.getOrNull()?.let { batch[file.uri] = it }
+                if (batch.size >= PREVIEW_BATCH || index == pending.lastIndex) {
+                    val chunk = batch.toMap()
+                    batch.clear()
+                    _state.update { it.copy(previews = it.previews + chunk) }
+                }
+            }
+        }
     }
 
     private suspend fun processLocal(file: PackageFile) = processItem(file.uri, skipIfSent = true) { target ->
@@ -476,6 +512,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private companion object {
         const val INCOMING_DIR = "incoming"
         const val MAX_INCOMING = 200
+        const val MAX_PREVIEWS = 1000
+        const val PREVIEW_BATCH = 8
     }
 
 }

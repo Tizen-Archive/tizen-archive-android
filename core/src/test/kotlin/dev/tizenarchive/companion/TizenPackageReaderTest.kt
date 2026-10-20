@@ -32,6 +32,7 @@ class TizenPackageReaderTest {
           <watch-application ambient-support="true" appid="com.example.watch" exec="com.example.watch">
             <label xml:lang="ru-ru">Циферблат</label>
             <label> Example Face </label>
+            <icon>face.png</icon>
           </watch-application>
         </manifest>"""
 
@@ -39,6 +40,7 @@ class TizenPackageReaderTest {
         <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://x/Y" version="2.0.1">
           <tizen:application id="AbCdEfGhIj.Calc" package="AbCdEfGhIj" required_version="2.3"/>
           <content src="index.html"/>
+          <icon src="img/icon.png" height="117" width="117"/>
           <name xml:lang="ru">Калькулятор</name>
           <name>Calc</name>
         </widget>"""
@@ -50,6 +52,7 @@ class TizenPackageReaderTest {
         assertEquals("com.example.watch", info.packageId)
         assertEquals("1.2.3", info.version)
         assertEquals("Example Face", info.displayName)
+        assertEquals("shared/res/face.png", info.iconPath)
     }
 
     @Test
@@ -59,6 +62,15 @@ class TizenPackageReaderTest {
         assertEquals("AbCdEfGhIj", info.packageId)
         assertEquals("2.0.1", info.version)
         assertEquals("Calc", info.displayName)
+        assertEquals("img/icon.png", info.iconPath)
+    }
+
+    @Test
+    fun `the icon is read from the archive`() {
+        val file = zip("config.xml" to wgtConfig, "img/icon.png" to "PNGDATA")
+        val info = TizenPackageReader.read(file)
+        assertEquals("PNGDATA", String(TizenPackageReader.readIcon(file, info)!!))
+        assertEquals(null, TizenPackageReader.readIcon(zip("config.xml" to wgtConfig), info))
     }
 
     @Test

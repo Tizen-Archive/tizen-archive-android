@@ -16,6 +16,7 @@ public object TizenPackageReader {
     private const val WEB_MANIFEST = "config.xml"
     private const val MAX_ENTRIES = 100_000
     private const val MAX_MANIFEST_BYTES = 1L shl 20
+    private const val MAX_ICON_BYTES = 1L shl 20
 
     public fun read(file: File): TizenPackageInfo {
         try {
@@ -32,6 +33,20 @@ public object TizenPackageReader {
         }
     }
 
+    /** The icon image bytes (at most 1 MiB), or null when the package has none or it is missing. */
+    public fun readIcon(file: File, info: TizenPackageInfo): ByteArray? {
+        val path = info.iconPath ?: return null
+        return try {
+            ZipFile(file).use { zip ->
+                val entry = zip.getEntry(path) ?: return null
+                if (entry.size !in 1..MAX_ICON_BYTES) return null
+                zip.getInputStream(entry).use { it.readNBytes(MAX_ICON_BYTES.toInt()) }
+            }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
     private fun ZipFile.readManifest(entry: java.util.zip.ZipEntry): ByteArray {
         if (entry.size !in 0..MAX_MANIFEST_BYTES) throw InvalidTizenPackageException("Manifest has an unexpected size")
         val bytes = getInputStream(entry).use { it.readNBytes(MAX_MANIFEST_BYTES.toInt() + 1) }
@@ -44,8 +59,11 @@ public object TizenPackageReader {
             var packageId: String? = null
             var version: String? = null
             var label: String? = null
+            var icon: String? = null
             private var inApplicationLabel = false
+            private var inIcon = false
             private val labelText = StringBuilder()
+            private val iconText = StringBuilder()
 
             override fun startElement(uri: String, local: String, qName: String, a: Attributes) {
                 depth++
@@ -55,11 +73,15 @@ public object TizenPackageReader {
                 } else if (depth == 3 && local == "label" && label == null && a.getValue("xml:lang") == null) {
                     inApplicationLabel = true
                     labelText.setLength(0)
+                } else if (depth == 3 && local == "icon" && icon == null) {
+                    inIcon = true
+                    iconText.setLength(0)
                 }
             }
 
             override fun characters(ch: CharArray, start: Int, length: Int) {
                 if (inApplicationLabel) labelText.append(ch, start, length)
+                if (inIcon) iconText.append(ch, start, length)
             }
 
             override fun endElement(uri: String, local: String, qName: String) {
@@ -67,13 +89,17 @@ public object TizenPackageReader {
                     label = labelText.toString().trim().ifEmpty { null }
                     inApplicationLabel = false
                 }
+                if (inIcon && local == "icon") {
+                    icon = iconText.toString().trim().ifEmpty { null }
+                    inIcon = false
+                }
                 depth--
             }
         }
         parse(xml, handler, namespaceAware = true)
         val id = handler.packageId?.trim().orEmpty()
         if (id.isEmpty()) throw InvalidTizenPackageException("tizen-manifest.xml has no package id")
-        return TizenPackageInfo(TizenPackageKind.TPK, id, handler.version, handler.label)
+        return TizenPackageInfo(TizenPackageKind.TPK, id, handler.version, handler.label, handler.icon?.let { "shared/res/$it" })
     }
 
     private fun parseWeb(xml: ByteArray): TizenPackageInfo {
@@ -81,6 +107,7 @@ public object TizenPackageReader {
             var packageId: String? = null
             var version: String? = null
             var name: String? = null
+            var icon: String? = null
             private var inName = false
             private val nameText = StringBuilder()
 
@@ -89,6 +116,7 @@ public object TizenPackageReader {
                 when {
                     depth == 1 && local == "widget" -> version = a.getValue("version")
                     depth == 2 && local == "application" && uri == TIZEN_WIDGETS_NS -> packageId = a.getValue("package")
+                    depth == 2 && local == "icon" && icon == null -> icon = a.getValue("src")?.trim()?.ifEmpty { null }
                     depth == 2 && local == "name" && name == null && a.getValue("xml:lang") == null -> {
                         inName = true
                         nameText.setLength(0)
@@ -111,7 +139,7 @@ public object TizenPackageReader {
         parse(xml, handler, namespaceAware = true)
         val id = handler.packageId?.trim().orEmpty()
         if (id.isEmpty()) throw InvalidTizenPackageException("config.xml has no tizen:application package id")
-        return TizenPackageInfo(TizenPackageKind.WGT, id, handler.version, handler.name)
+        return TizenPackageInfo(TizenPackageKind.WGT, id, handler.version, handler.name, handler.icon)
     }
 
     private fun parse(xml: ByteArray, handler: DefaultHandler, namespaceAware: Boolean) {
