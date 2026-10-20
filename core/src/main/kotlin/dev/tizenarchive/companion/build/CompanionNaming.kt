@@ -9,12 +9,14 @@ import java.time.Instant
  * package again replaces the companion (an update), and Gear Plugin delivers the package to the watch again.
  */
 public object CompanionNaming {
-    private const val PREFIX = "dev.tizenarchive.companion.p"
+    /** Every companion package name starts with this; the rest is a hash of the Tizen package id. */
+    public const val PACKAGE_PREFIX: String = "dev.tizenarchive.companion.p"
+
     private val EPOCH: Instant = Instant.parse("2026-01-01T00:00:00Z")
 
     public fun androidPackageName(tizenPackageId: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(tizenPackageId.toByteArray(Charsets.UTF_8))
-        return PREFIX + digest.take(10).joinToString("") { "%02x".format(it) }
+        return PACKAGE_PREFIX + digest.take(10).joinToString("") { "%02x".format(it) }
     }
 
     /** Seconds since 2026-01-01: grows with every build, so a reinstall is always an upgrade. */

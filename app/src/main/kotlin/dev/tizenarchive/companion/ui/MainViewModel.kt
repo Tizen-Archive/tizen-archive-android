@@ -20,11 +20,14 @@ import dev.tizenarchive.companion.catalog.InvalidLinkException
 import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.catalog.Selection
 import dev.tizenarchive.companion.catalog.VersionInfo
+import dev.tizenarchive.companion.companions.CompanionRepository
+import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.FolderScanner
 import dev.tizenarchive.companion.files.FolderStore
 import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.PackageInstallerGateway
+import dev.tizenarchive.companion.install.UninstallOutcome
 import dev.tizenarchive.companion.signing.KeystoreSigningKey
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -69,6 +72,16 @@ internal sealed interface RemoteState {
     data class Problem(val problem: RemoteProblem) : RemoteState
 }
 
+/** Removing a companion from the phone also removes the app from the watch. */
+internal sealed interface RemovalState {
+    data class Confirm(val companion: InstalledCompanion) : RemovalState
+    data class Working(val companion: InstalledCompanion) : RemovalState
+
+    /** The helper app is gone from the phone; Gear Plugin may or may not have removed the app from the watch. */
+    data class Done(val companion: InstalledCompanion) : RemovalState
+    data class Failed(val companion: InstalledCompanion, val reason: String?) : RemovalState
+}
+
 internal data class UiState(
     val folderName: String? = null,
     val scanning: Boolean = false,
@@ -79,6 +92,8 @@ internal data class UiState(
     val installing: Boolean = false,
     val needsInstallPermission: Boolean = false,
     val remote: RemoteState? = null,
+    val companions: List<InstalledCompanion> = emptyList(),
+    val removal: RemovalState? = null,
 ) {
     val visibleFiles: List<PackageFile>
         get() = if (query.isBlank()) files else files.filter { it.name.contains(query.trim(), ignoreCase = true) }
@@ -92,6 +107,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val context = application
     private val folders = FolderStore(application)
     private val gateway = PackageInstallerGateway(application)
+    private val companionRepository = CompanionRepository(application)
     private val signingKey = KeystoreSigningKey()
     private val catalog = CatalogClient(
         BuildConfig.CATALOG_URL,
@@ -113,6 +129,36 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             withContext(Dispatchers.IO) { workDir.deleteRecursively() }
             folders.load()?.let { openFolder(it) }
+        }
+        refreshCompanions()
+    }
+
+    // ---- Companions on the phone (= apps sent to the watch) ---------------------------------------------
+
+    fun refreshCompanions() {
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { runCatching { companionRepository.list() }.getOrDefault(emptyList()) }
+            _state.update { it.copy(companions = list) }
+        }
+    }
+
+    fun askRemoval(companion: InstalledCompanion) = _state.update { it.copy(removal = RemovalState.Confirm(companion)) }
+
+    fun dismissRemoval() {
+        if (_state.value.removal !is RemovalState.Working) _state.update { it.copy(removal = null) }
+    }
+
+    fun confirmRemoval() {
+        val companion = (_state.value.removal as? RemovalState.Confirm)?.companion ?: return
+        _state.update { it.copy(removal = RemovalState.Working(companion)) }
+        viewModelScope.launch {
+            val next = when (val outcome = gateway.uninstall(companion.androidPackage)) {
+                UninstallOutcome.Removed -> RemovalState.Done(companion)
+                UninstallOutcome.Declined -> null
+                is UninstallOutcome.Failed -> RemovalState.Failed(companion, outcome.message)
+            }
+            _state.update { it.copy(removal = next) }
+            refreshCompanions()
         }
     }
 
@@ -159,6 +205,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 for (file in queue) processLocal(file)
             } finally {
                 _state.update { it.copy(installing = false) }
+                refreshCompanions()
             }
         }
     }
@@ -229,6 +276,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 }
             } finally {
                 _state.update { it.copy(installing = false, remote = RemoteState.Finished(title, final)) }
+                refreshCompanions()
             }
         }
     }

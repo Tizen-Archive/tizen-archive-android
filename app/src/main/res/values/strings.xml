@@ -17,6 +17,19 @@
     <string name="allow_unknown_title">Allow installing apps</string>
     <string name="allow_unknown_message">Android must allow this app to install the small helper app that carries each package to the watch. Enable the permission, then come back and press the button again.</string>
     <string name="open_settings">Open settings</string>
+    <string name="tab_install">Install</string>
+    <string name="tab_watch">On the watch (%1$d)</string>
+    <string name="watch_intro">Apps this phone sent to the watch. Removing a helper app asks Galaxy Wearable to remove the app from the watch too, but it does not always do it. The app cannot check what is on the watch; the list in Galaxy Wearable is the reference.</string>
+    <string name="watch_empty">Nothing sent yet. Helper apps made by older versions of this app are not shown; install the package again to see it here.</string>
+    <string name="watch_sent">Sent %1$s</string>
+    <string name="remove_from_watch">Remove from the watch</string>
+    <string name="remove_title">Remove “%1$s”?</string>
+    <string name="remove_message">Android will remove the helper app and Galaxy Wearable should remove the app from the watch. This does not always happen: afterwards check the app list in Galaxy Wearable and remove the app there if it is still on the watch.</string>
+    <string name="remove_working">Confirm the removal in the Android dialog…</string>
+    <string name="remove_failed">Could not remove the helper app: %1$s</string>
+    <string name="remove_done_title">Removed from the phone</string>
+    <string name="remove_done_message">The helper app is removed. Galaxy Wearable should remove the app from the watch, but this does not always happen: check the app list in Galaxy Wearable.</string>
+    <string name="open_wearable">Open Galaxy Wearable</string>
     <string name="state_queued">Waiting</string>
     <string name="state_reading">Reading package</string>
     <string name="state_building">Building helper app</string>
@@ -46,7 +59,7 @@
     <string name="state_conflict">A helper app for this package was installed with a different key. Uninstall it in Android settings first (this also removes the app from the watch), then try again.</string>
     <string name="state_failed">Failed: %1$s</string>
     <string name="summary">Installed: %1$d, failed: %2$d, cancelled: %3$d</string>
-    <string name="wearable_note">Do not uninstall helper apps while the watch is connected: that also removes the app from the watch.</string>
+    <string name="wearable_note">Removing a helper app from the phone may also remove the app from the watch, but Galaxy Wearable does not always do it. Check the app list in Galaxy Wearable.</string>
     <string name="size_kb">%1$d KB</string>
     <string name="size_mb">%1$.1f MB</string>
 </resources>

@@ -15,5 +15,5 @@ Requirements:
 Good to know:
 • Android asks you to confirm the installation of every helper app.
 • Galaxy Wearable handles one package at a time, so the app waits between installations; a large package can take minutes over Bluetooth.
-• Do not uninstall a helper app while the watch is connected: that removes the app from the watch as well. Turn Bluetooth off first if you only want to free space on the phone, and test with one package before cleaning up all of them.
+• The "On the watch" tab lists the apps this phone sent to the watch and can remove their helper apps. Removing a helper app asks Galaxy Wearable to remove the app from the watch too, but it does not always do it: check the app list in Galaxy Wearable.
 • The app only talks to the network when you open an install link from the Tizen Archive website.

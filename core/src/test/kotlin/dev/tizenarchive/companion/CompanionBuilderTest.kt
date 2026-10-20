@@ -2,6 +2,7 @@ package dev.tizenarchive.companion
 
 import com.android.apksig.ApkVerifier
 import com.android.apksig.apk.ApkUtils
+import dev.tizenarchive.companion.apk.CompanionMetadata
 import dev.tizenarchive.companion.build.CompanionBuilder
 import dev.tizenarchive.companion.build.CompanionNaming
 import dev.tizenarchive.companion.build.SigningKey
@@ -56,6 +57,11 @@ class CompanionBuilderTest {
             assertTrue(zip.getEntry("assets/watcher.wgt") != null)
         }
         assertTrue(File(dir, "out").listFiles()!!.none { it.name.endsWith(".unsigned.apk") })
+
+        // the companion tells which Tizen package it carries
+        val xml = ZipFile(built.apk).use { it.getInputStream(it.getEntry("AndroidManifest.xml")).readBytes() }
+        val strings = String(xml, Charsets.UTF_16LE)
+        assertTrue(strings.contains("AbCdEfGhIj") && strings.contains(CompanionMetadata.MARKER_ACTION))
     }
 
     @Test

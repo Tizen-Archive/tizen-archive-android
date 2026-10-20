@@ -47,7 +47,9 @@ postponed to early 2027; see [docs/RELEASING.md](docs/RELEASING.md).
   minutes over Bluetooth).
 - The app cannot see whether the watch accepted the package; it only knows that the companion is installed on the
   phone.
-- Do not uninstall a companion while the watch is connected: that removes the app from the watch as well.
+- The "On the watch" tab lists the companions on the phone (they carry the name and version of the Tizen package) and can
+  remove them. Removing a companion asks Gear Plugin to remove the app from the watch too, but Gear Plugin does not
+  always do it; check the app list in Galaxy Wearable (the app offers to open it).
 
 ## How it is built
 
