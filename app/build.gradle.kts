@@ -23,8 +23,22 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing is optional: F-Droid signs its own builds, so without these properties the release APK stays
+    // unsigned. For a signed GitHub release pass -PreleaseStoreFile, -PreleaseStorePassword, -PreleaseKeyAlias and
+    // -PreleaseKeyPassword on the command line (never commit them).
+    val releaseStoreFile = providers.gradleProperty("releaseStoreFile").orNull
+    if (releaseStoreFile != null) {
+        signingConfigs.create("release") {
+            storeFile = file(releaseStoreFile)
+            storePassword = providers.gradleProperty("releaseStorePassword").get()
+            keyAlias = providers.gradleProperty("releaseKeyAlias").get()
+            keyPassword = providers.gradleProperty("releaseKeyPassword").get()
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseStoreFile != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

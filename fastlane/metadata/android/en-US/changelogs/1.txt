@@ -1,0 +1,1 @@
+First release: install .wgt and .tpk packages from a folder or from the Tizen Archive catalog link.

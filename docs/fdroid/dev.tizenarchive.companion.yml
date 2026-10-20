@@ -1,0 +1,33 @@
+# Draft of the F-Droid build recipe (fdroiddata: metadata/dev.tizenarchive.companion.yml).
+# Fill the <...> placeholders once the repository is public, then check it with `fdroid lint` and `fdroid build`.
+Categories:
+  - Connectivity
+License: Apache-2.0
+AuthorName: Tizen Archive
+AuthorEmail: developer@tizen-archive.com
+WebSite: https://tizen-archive.com
+SourceCode: <REPOSITORY_URL>
+IssueTracker: <REPOSITORY_URL>/issues
+
+# Galaxy Wearable and Samsung's Gear Plugin (both proprietary) are required for the app to do anything.
+AntiFeatures:
+  NonFreeDep:
+    en-US: Needs Samsung's proprietary Galaxy Wearable and Gear Plugin apps to deliver packages to the watch.
+
+AutoName: Tizen Companion Installer
+
+RepoType: git
+Repo: <REPOSITORY_URL>.git
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: v0.1.0
+    subdir: app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1
