@@ -22,10 +22,15 @@ Repo: https://github.com/Tizen-Archive/tizen-companion-installer.git
 Builds:
   - versionName: 0.1.1
     versionCode: 2
-    commit: v0.1.1
+    commit: 0633d395f4a71326fd9f772b52206fbe4d0040cf
     subdir: app
     gradle:
       - yes
+
+# Reproducible build: F-Droid rebuilds the release, and when the result matches the APK published on GitHub it
+# distributes that APK with our signature, so users can switch between the two channels.
+Binaries: https://github.com/Tizen-Archive/tizen-companion-installer/releases/download/v%v/tizen-companion-installer-%v.apk
+AllowedAPKSigningKeys: 82f1dbd6fb4ef4b68f3b07c62a95c4dcd294c0b0f1e7c4e556891f452e7b8bd9
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags

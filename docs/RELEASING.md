@@ -15,8 +15,8 @@
   -PreleaseKeyAlias=... -PreleaseKeyPassword=...
 ```
 
-Without the properties the release APK stays unsigned, which is what F-Droid builds and signs itself. Keep the
-keystore outside the repository.
+Without the properties the release APK stays unsigned, which is what F-Droid builds. Keep the keystore outside the
+repository.
 
 ## Publishing the GitHub release as the organization's GitHub App
 
@@ -43,9 +43,14 @@ Open a merge request to <https://gitlab.com/fdroid/fdroiddata> with `docs/fdroid
   list of resolved artifacts (checksums are verified on every build);
 - dependency metadata blobs are switched off (`dependenciesInfo`);
 - the Gradle distribution and wrapper are pinned (`distributionSha256Sum`);
-- the app needs Samsung's proprietary Galaxy Wearable, hence the `NonFreeDep` anti-feature in the draft.
+- the app needs Samsung's proprietary Galaxy Wearable, hence the `NonFreeDep` anti-feature in the draft;
+- the build is reproducible, so the recipe sets `Binaries` (the APK of the GitHub release) and `AllowedAPKSigningKeys`
+  (SHA-256 of our release certificate): when F-Droid's rebuild matches the GitHub APK it publishes **our signed APK**,
+  and users can switch between GitHub and F-Droid. Check a release before tagging it:
+  `apksigcopier compare <github apk> --unsigned <fdroid-built apk>` (the F-Droid build is `unsigned/<id>_<versionCode>.apk`
+  in the scratch directory).
 
-Screenshots (`fastlane/metadata/android/<locale>/images/phoneScreenshots/`) are not included yet.
+Store images live in `fastlane/metadata/android/<locale>/images/` (`icon.png`, `phoneScreenshots/`).
 
 ## Checking the F-Droid build locally
 
