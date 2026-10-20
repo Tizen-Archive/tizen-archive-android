@@ -11,6 +11,12 @@
         <item quantity="many">Найдено %1$d пакетов</item>
         <item quantity="other">Найдено %1$d пакета</item>
     </plurals>
+    <plurals name="incoming_rejected">
+        <item quantity="one">%1$d полученный файл не является пакетом Tizen и пропущен (нажмите, чтобы скрыть)</item>
+        <item quantity="few">%1$d полученных файла не являются пакетами Tizen и пропущены (нажмите, чтобы скрыть)</item>
+        <item quantity="many">%1$d полученных файлов не являются пакетами Tizen и пропущены (нажмите, чтобы скрыть)</item>
+        <item quantity="other">%1$d полученных файла не являются пакетами Tizen и пропущены (нажмите, чтобы скрыть)</item>
+    </plurals>
     <string name="search">Поиск по имени файла</string>
     <string name="select_all">Выбрать все</string>
     <string name="clear_selection">Снять выбор</string>

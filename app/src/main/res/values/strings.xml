@@ -9,6 +9,10 @@
         <item quantity="one">%1$d package found</item>
         <item quantity="other">%1$d packages found</item>
     </plurals>
+    <plurals name="incoming_rejected">
+        <item quantity="one">%1$d received file is not a Tizen package and was ignored (tap to hide)</item>
+        <item quantity="other">%1$d received files are not Tizen packages and were ignored (tap to hide)</item>
+    </plurals>
     <string name="search">Search by file name</string>
     <string name="select_all">Select all</string>
     <string name="clear_selection">Clear selection</string>
