@@ -13,6 +13,8 @@ public data class TizenPackageInfo(
     val packageId: String,
     val version: String?,
     val displayName: String?,
+    /** Path of the icon inside the archive, when the manifest names one. */
+    val iconPath: String? = null,
 )
 
 public class InvalidTizenPackageException(message: String, cause: Throwable? = null) : Exception(message, cause)

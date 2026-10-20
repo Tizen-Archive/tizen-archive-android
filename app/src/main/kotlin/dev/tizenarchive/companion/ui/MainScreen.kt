@@ -6,7 +6,13 @@ import android.provider.Settings
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -51,6 +57,7 @@ import dev.tizenarchive.companion.catalog.CatalogError
 import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
+import dev.tizenarchive.companion.files.PackagePreview
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,6 +150,7 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 Column {
                     FileRow(
                         file = file,
+                        preview = state.previews[file.uri],
                         checked = file.uri in state.selected,
                         enabled = !state.installing,
                         itemState = state.states[file.uri],
@@ -385,7 +393,7 @@ private fun FolderCard(state: UiState, onPick: () -> Unit) {
 }
 
 @Composable
-private fun FileRow(file: PackageFile, checked: Boolean, enabled: Boolean, itemState: ItemState?, onToggle: () -> Unit) {
+private fun FileRow(file: PackageFile, preview: PackagePreview?, checked: Boolean, enabled: Boolean, itemState: ItemState?, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -394,13 +402,30 @@ private fun FileRow(file: PackageFile, checked: Boolean, enabled: Boolean, itemS
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(file.name, style = MaterialTheme.typography.bodyLarge)
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            preview?.icon?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+        }
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(preview?.name ?: file.name, style = MaterialTheme.typography.bodyLarge)
+            val details = listOfNotNull(
+                preview?.packageId,
+                preview?.version?.let { "v$it" },
+                preview?.kind?.uppercase(),
+                formatSize(file.size),
+            ).joinToString(" · ")
             Text(
-                text = itemState?.let { describe(it) } ?: formatSize(file.size),
+                text = itemState?.let { describe(it) } ?: details,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (itemState is ItemState.Failed || itemState is ItemState.SignatureConflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (preview?.name != null && itemState == null) {
+                Text(file.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+            }
         }
     }
 }
