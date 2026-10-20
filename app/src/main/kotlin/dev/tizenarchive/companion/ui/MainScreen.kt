@@ -1,6 +1,9 @@
 package dev.tizenarchive.companion.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.net.Uri
 import android.provider.Settings
 import android.text.format.DateUtils
@@ -42,16 +45,20 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.tizenarchive.companion.R
 import dev.tizenarchive.companion.catalog.CatalogError
@@ -71,6 +78,27 @@ internal fun MainScreen(viewModel: MainViewModel) {
 
     var tab by rememberSaveable { mutableIntStateOf(TAB_INSTALL) }
 
+    // A long queue must not be cut off by the screen turning off
+    val view = LocalView.current
+    DisposableEffect(state.installing) {
+        view.keepScreenOn = state.installing
+        onDispose { view.keepScreenOn = false }
+    }
+
+    // Ask once for the right to show "queue finished"; the queue starts either way
+    var notificationsAsked by rememberSaveable { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { viewModel.installSelected() }
+    val startInstall = {
+        val needsAsk = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.selected.size > 1 && !notificationsAsked &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (needsAsk) {
+            notificationsAsked = true
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.installSelected()
+        }
+    }
+
     Scaffold(
         topBar = {
             Column {
@@ -89,7 +117,7 @@ internal fun MainScreen(viewModel: MainViewModel) {
             if (tab == TAB_INSTALL) {
                 BottomActions(
                     state = state,
-                    onInstall = viewModel::installSelected,
+                    onInstall = startInstall,
                     onCancel = viewModel::cancel,
                 )
             }

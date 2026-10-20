@@ -40,6 +40,8 @@
     <string name="missing_open_store">Get Galaxy Wearable</string>
     <string name="missing_plugin">Samsung\'s Gear Plugin is not installed. Galaxy Wearable adds it when you connect a Galaxy Watch or Gear watch: connect your watch there first.</string>
     <string name="missing_permission">Android must allow this app to install the small helper app that carries each package to the watch.</string>
+    <string name="notification_channel">Queue finished</string>
+    <string name="notification_done">Sending to the watch finished</string>
     <string name="state_queued">Waiting</string>
     <string name="state_reading">Reading package</string>
     <string name="state_building">Building helper app</string>

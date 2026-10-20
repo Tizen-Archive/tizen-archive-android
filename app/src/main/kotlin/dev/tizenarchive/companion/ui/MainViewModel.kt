@@ -32,6 +32,7 @@ import dev.tizenarchive.companion.files.PreviewLoader
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.PackageInstallerGateway
 import dev.tizenarchive.companion.install.UninstallOutcome
+import dev.tizenarchive.companion.notify.QueueNotifier
 import dev.tizenarchive.companion.signing.KeystoreSigningKey
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.File
@@ -150,6 +151,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     )
     private val workDir = File(application.cacheDir, "work")
     private val previewLoader = PreviewLoader(application)
+    private val notifier = QueueNotifier(application)
     private var previewJob: Job? = null
 
     private val _state = MutableStateFlow(UiState())
@@ -234,6 +236,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    /** The app is in front again: the "queue finished" notification is no longer needed. */
+    fun clearNotification() = notifier.cancel()
+
     fun refreshInstallPermission() {
         if (context.packageManager.canRequestPackageInstalls()) _state.update { it.copy(needsInstallPermission = false) }
         refreshMissing()
@@ -280,6 +285,15 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 _state.update { it.copy(installing = false) }
                 refreshCompanions()
                 forgetSentIncoming()
+                if (queue.size > 1) {
+                    val states = _state.value.states
+                    notifier.notifyDone(
+                        sent = states.values.count { it is ItemState.Installed },
+                        skipped = states.values.count { it is ItemState.AlreadySent },
+                        failed = states.values.count { it is ItemState.Failed || it is ItemState.SignatureConflict },
+                        cancelled = states.values.count { it is ItemState.Cancelled },
+                    )
+                }
             }
         }
     }
