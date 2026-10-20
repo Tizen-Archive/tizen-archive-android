@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.tizenarchive.companion.BuildConfig
@@ -29,6 +30,7 @@ import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.PackageInstallerGateway
 import dev.tizenarchive.companion.install.UninstallOutcome
 import dev.tizenarchive.companion.signing.KeystoreSigningKey
+import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +88,10 @@ internal data class UiState(
     val folderName: String? = null,
     val scanning: Boolean = false,
     val files: List<PackageFile> = emptyList(),
+    /** Files received from other apps ("Open with", "Share"), copied to the cache. */
+    val incoming: List<PackageFile> = emptyList(),
+    /** How many received files were not Tizen packages and were dropped. */
+    val incomingRejected: Int = 0,
     val query: String = "",
     val selected: Set<Uri> = emptySet(),
     val states: Map<Uri, ItemState> = emptyMap(),
@@ -95,8 +101,10 @@ internal data class UiState(
     val companions: List<InstalledCompanion> = emptyList(),
     val removal: RemovalState? = null,
 ) {
+    val allFiles: List<PackageFile> get() = incoming + files
+
     val visibleFiles: List<PackageFile>
-        get() = if (query.isBlank()) files else files.filter { it.name.contains(query.trim(), ignoreCase = true) }
+        get() = if (query.isBlank()) allFiles else allFiles.filter { it.name.contains(query.trim(), ignoreCase = true) }
 
     val installed: Int get() = states.values.count { it is ItemState.Installed }
     val failed: Int get() = states.values.count { it is ItemState.Failed || it is ItemState.SignatureConflict }
@@ -127,7 +135,10 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     init {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { workDir.deleteRecursively() }
+            withContext(Dispatchers.IO) {
+                workDir.deleteRecursively()
+                File(context.cacheDir, INCOMING_DIR).deleteRecursively()
+            }
             folders.load()?.let { openFolder(it) }
         }
         refreshCompanions()
@@ -196,7 +207,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
-        val queue = _state.value.files.filter { it.uri in _state.value.selected }
+        val queue = _state.value.allFiles.filter { it.uri in _state.value.selected }
         if (queue.isEmpty()) return
         _state.update { it.copy(installing = true, states = queue.associate { f -> f.uri to ItemState.Queued }) }
         lastInstallMark = null
@@ -206,12 +217,71 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             } finally {
                 _state.update { it.copy(installing = false) }
                 refreshCompanions()
+                forgetSentIncoming()
             }
         }
     }
 
     fun cancel() {
         job?.cancel()
+    }
+
+    // ---- Files from other apps ("Open with", "Share") -------------------------------------------------
+
+    fun onIncoming(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val (accepted, rejected) = withContext(Dispatchers.IO) { copyIncoming(uris.take(MAX_INCOMING)) }
+            _state.update { state ->
+                val known = state.incoming.map { it.uri }.toSet()
+                val fresh = accepted.filter { it.uri !in known }
+                state.copy(
+                    incoming = state.incoming + fresh,
+                    selected = state.selected + fresh.map(PackageFile::uri),
+                    incomingRejected = state.incomingRejected + rejected,
+                )
+            }
+        }
+    }
+
+    fun dismissIncomingNotice() = _state.update { it.copy(incomingRejected = 0) }
+
+    private fun copyIncoming(uris: List<Uri>): Pair<List<PackageFile>, Int> {
+        val dir = File(context.cacheDir, INCOMING_DIR).apply { mkdirs() }
+        val accepted = mutableListOf<PackageFile>()
+        var rejected = 0
+        for (uri in uris) {
+            val name = displayName(uri) ?: "package-${System.nanoTime()}"
+            val target = File(dir, "${System.nanoTime()}-${name.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)}")
+            try {
+                val input = context.contentResolver.openInputStream(uri) ?: error("Cannot open")
+                input.use { src -> target.outputStream().use { src.copyTo(it) } }
+                TizenPackageReader.read(target)
+                accepted += PackageFile(Uri.fromFile(target), name, target.length())
+            } catch (e: Exception) {
+                target.delete()
+                rejected++
+            }
+        }
+        return accepted to rejected
+    }
+
+    private fun displayName(uri: Uri): String? {
+        if (uri.scheme == "file") return uri.lastPathSegment
+        return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }
+
+    /** Received files that were installed are no longer needed. */
+    private fun forgetSentIncoming() {
+        val sent = _state.value.incoming.filter { _state.value.states[it.uri] is ItemState.Installed }
+        if (sent.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) { sent.forEach { it.uri.path?.let { path -> File(path).delete() } } }
+        _state.update { state ->
+            val gone = sent.map(PackageFile::uri).toSet()
+            state.copy(incoming = state.incoming.filterNot { it.uri in gone }, selected = state.selected - gone)
+        }
     }
 
     // ---- Link from the website ----------------------------------------------------------------------------
@@ -356,5 +426,10 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             set(ItemState.Waiting(((left + 999) / 1000).toInt()))
             delay(minOf(left, 1000))
         }
+    }
+
+    private companion object {
+        const val INCOMING_DIR = "incoming"
+        const val MAX_INCOMING = 200
     }
 }

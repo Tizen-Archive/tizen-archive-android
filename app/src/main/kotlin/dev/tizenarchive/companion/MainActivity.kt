@@ -1,6 +1,7 @@
 package dev.tizenarchive.companion
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +15,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.IntentCompat
 import dev.tizenarchive.companion.ui.MainScreen
 import dev.tizenarchive.companion.ui.MainViewModel
 
@@ -35,11 +37,26 @@ internal class MainActivity : ComponentActivity() {
     }
 
     private fun handleLink(intent: Intent?) {
-        val data = intent?.data ?: return
-        if (intent.action == Intent.ACTION_VIEW && data.scheme == "tizen-archive") {
-            viewModel.onInstallLink(data.toString())
-            // The link must not be handled again after a configuration change or a return to the app.
-            intent.data = null
+        if (intent == null) return
+        when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val data = intent.data ?: return
+                if (data.scheme == "tizen-archive") {
+                    viewModel.onInstallLink(data.toString())
+                } else {
+                    viewModel.onIncoming(listOf(data))
+                }
+                // The intent must not be handled again after a configuration change or a return to the app.
+                intent.data = null
+            }
+            Intent.ACTION_SEND -> {
+                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { viewModel.onIncoming(listOf(it)) }
+                intent.removeExtra(Intent.EXTRA_STREAM)
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { viewModel.onIncoming(it) }
+                intent.removeExtra(Intent.EXTRA_STREAM)
+            }
         }
     }
 

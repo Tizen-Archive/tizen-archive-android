@@ -100,7 +100,17 @@ internal fun MainScreen(viewModel: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { FolderCard(state, onPick = { picker.launch(null) }) }
-            if (state.files.isNotEmpty()) {
+            if (state.incomingRejected > 0) {
+                item {
+                    Text(
+                        pluralStringResource(R.plurals.incoming_rejected, state.incomingRejected, state.incomingRejected),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.clickable(onClick = viewModel::dismissIncomingNotice),
+                    )
+                }
+            }
+            if (state.allFiles.isNotEmpty()) {
                 item {
                     OutlinedTextField(
                         value = state.query,

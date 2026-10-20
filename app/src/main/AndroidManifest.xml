@@ -31,6 +31,36 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Open with" for downloaded packages: by MIME type, and by extension for file managers -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.wgt" />
+                <data android:pathPattern=".*\\..*\\.wgt" />
+                <data android:pathPattern=".*\\..*\\..*\\.wgt" />
+                <data android:pathPattern=".*\\.tpk" />
+                <data android:pathPattern=".*\\..*\\.tpk" />
+                <data android:pathPattern=".*\\..*\\..*\\.tpk" />
+            </intent-filter>
+            <!-- "Share" from another app -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
             <!-- The "Install on the watch" button of the website: tizen-archive://install?package=...&version=... -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
