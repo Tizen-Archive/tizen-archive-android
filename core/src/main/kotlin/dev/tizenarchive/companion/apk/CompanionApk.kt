@@ -1,11 +1,14 @@
 package dev.tizenarchive.companion.apk
 
+import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.attribute.FileTime
 import java.time.Instant
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /** A Tizen package that is embedded into the companion without changes. [open] must be repeatable. */
@@ -24,6 +27,21 @@ public object CompanionApk {
     private val FIXED_TIME: FileTime = FileTime.from(Instant.parse("2026-01-01T00:00:00Z"))
 
     public fun assetName(extension: String): String = "assets/watcher.$extension"
+
+    /**
+     * Copies the Tizen package out of an installed companion (its own APK file), so it can be sent again without the
+     * original file. Returns the extension of the package.
+     */
+    public fun extractPackage(companionApk: File, target: File): String {
+        ZipFile(companionApk).use { zip ->
+            for (extension in listOf("wgt", "tpk")) {
+                val entry = zip.getEntry(assetName(extension)) ?: continue
+                zip.getInputStream(entry).use { input -> target.outputStream().buffered().use { input.copyTo(it, BUFFER) } }
+                return extension
+            }
+        }
+        throw IOException("The companion does not carry a Tizen package")
+    }
 
     public fun writeUnsigned(out: OutputStream, manifest: CompanionManifest, pkg: TizenPackageFile) {
         ZipOutputStream(out).use { zip ->

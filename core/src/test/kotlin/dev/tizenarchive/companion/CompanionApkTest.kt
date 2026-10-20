@@ -77,4 +77,19 @@ class CompanionApkTest {
             CompanionApk.writeUnsigned(ByteArrayOutputStream(), manifest, lying)
         }
     }
+
+    @Test
+    fun `the package can be extracted from a companion again`(@TempDir dir: File) {
+        val apk = File(dir, "c.apk").apply { writeBytes(unsigned()) }
+        val out = File(dir, "out.bin")
+        assertEquals("wgt", CompanionApk.extractPackage(apk, out))
+        assertArrayEquals(payload, out.readBytes())
+    }
+
+    @Test
+    fun `a zip without a package is refused`(@TempDir dir: File) {
+        val empty = File(dir, "e.apk")
+        java.util.zip.ZipOutputStream(empty.outputStream()).use { it.putNextEntry(ZipEntry("x")); it.closeEntry() }
+        org.junit.jupiter.api.assertThrows<java.io.IOException> { CompanionApk.extractPackage(empty, File(dir, "o")) }
+    }
 }

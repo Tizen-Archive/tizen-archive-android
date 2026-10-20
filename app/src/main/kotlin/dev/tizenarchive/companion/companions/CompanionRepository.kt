@@ -17,6 +17,8 @@ internal data class InstalledCompanion(
     val kind: String?,
     val firstInstalledAt: Long,
     val updatedAt: Long,
+    /** The companion's own APK, from which the Tizen package can be taken out again. */
+    val sourceDir: String,
 )
 
 /**
@@ -48,6 +50,7 @@ internal class CompanionRepository(private val context: Context) {
                     kind = meta?.getString(CompanionMetadata.TIZEN_KIND),
                     firstInstalledAt = info.firstInstallTime,
                     updatedAt = info.lastUpdateTime,
+                    sourceDir = application.sourceDir,
                 )
             }
             .sortedWith(compareBy({ it.label.lowercase(Locale.ROOT) }, { it.androidPackage }))

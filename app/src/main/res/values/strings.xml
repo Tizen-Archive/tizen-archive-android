@@ -23,9 +23,10 @@
     <string name="open_settings">Open settings</string>
     <string name="tab_install">Install</string>
     <string name="tab_watch">On the watch (%1$d)</string>
-    <string name="watch_intro">Apps this phone sent to the watch. Removing a helper app asks Galaxy Wearable to remove the app from the watch too, but it does not always do it. The app cannot check what is on the watch; the list in Galaxy Wearable is the reference.</string>
+    <string name="watch_intro">Apps this phone sent to the watch. "Send again" takes the package out of the helper app and sends it to the watch once more, e.g. after a failed delivery. Removing a helper app asks Galaxy Wearable to remove the app from the watch too, but it does not always do it. The app cannot check what is on the watch; the list in Galaxy Wearable is the reference.</string>
     <string name="watch_empty">Nothing sent yet. Helper apps made by older versions of this app are not shown; install the package again to see it here.</string>
     <string name="watch_sent">Sent %1$s</string>
+    <string name="resend_to_watch">Send again</string>
     <string name="remove_from_watch">Remove from the watch</string>
     <string name="remove_title">Remove “%1$s”?</string>
     <string name="remove_message">Android will remove the helper app and Galaxy Wearable should remove the app from the watch. This does not always happen: afterwards check the app list in Galaxy Wearable and remove the app there if it is still on the watch.</string>

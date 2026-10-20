@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.tizenarchive.companion.BuildConfig
+import dev.tizenarchive.companion.apk.CompanionApk
 import dev.tizenarchive.companion.build.CompanionBuilder
 import dev.tizenarchive.companion.build.DeliveryPacing
 import dev.tizenarchive.companion.catalog.Artifact
@@ -42,6 +43,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** The key under which the state of sending a companion again is kept (the list items use their file URI). */
+internal fun companionKey(androidPackage: String): Uri = Uri.parse("companion:$androidPackage")
 
 internal sealed interface ItemState {
     data object Queued : ItemState
@@ -170,6 +174,26 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             }
             _state.update { it.copy(removal = next) }
             refreshCompanions()
+        }
+    }
+
+    /** Sends the package of a listed companion again, taking it out of the companion itself (e.g. after a failed delivery). */
+    fun resend(companion: InstalledCompanion) {
+        if (_state.value.installing) return
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            _state.update { it.copy(needsInstallPermission = true) }
+            return
+        }
+        val key = companionKey(companion.androidPackage)
+        _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
+        lastInstallMark = null
+        job = viewModelScope.launch {
+            try {
+                processItem(key) { target -> CompanionApk.extractPackage(File(companion.sourceDir), target) }
+            } finally {
+                _state.update { it.copy(installing = false) }
+                refreshCompanions()
+            }
         }
     }
 
@@ -342,7 +366,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                             }
                         }
                     }
-                    buildAndInstall(local, confirm.artifact.size, ::set)
+                    buildAndInstall(local, ::set)
                 }
             } finally {
                 _state.update { it.copy(installing = false, remote = RemoteState.Finished(title, final)) }
@@ -365,18 +389,23 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         _state.update { it.copy(folderName = name, scanning = false, files = files) }
     }
 
-    private suspend fun processLocal(file: PackageFile) {
-        fun set(state: ItemState) = _state.update { it.copy(states = it.states + (file.uri to state)) }
+    private suspend fun processLocal(file: PackageFile) = processItem(file.uri) { target ->
+        val input = context.contentResolver.openInputStream(file.uri) ?: error("Cannot open the file")
+        input.use { src -> target.outputStream().use { src.copyTo(it) } }
+    }
+
+    /** Takes the package ([prepare] writes it to the file), builds a companion, installs it and records the state under [key]. */
+    private suspend fun processItem(key: Uri, prepare: suspend (File) -> Unit) {
+        fun set(state: ItemState) = _state.update { it.copy(states = it.states + (key to state)) }
         val state = runCatchingItem(::set) {
             set(ItemState.Reading)
             val local = File(workDir, "package.bin")
             withContext(Dispatchers.IO) {
                 workDir.deleteRecursively()
                 workDir.mkdirs()
-                val input = context.contentResolver.openInputStream(file.uri) ?: error("Cannot open the file")
-                input.use { src -> local.outputStream().use { src.copyTo(it) } }
+                prepare(local)
             }
-            buildAndInstall(local, file.size, ::set)
+            buildAndInstall(local, ::set)
         }
         set(state)
     }
@@ -396,7 +425,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             withContext(NonCancellable + Dispatchers.IO) { workDir.deleteRecursively() }
         }
 
-    private suspend fun buildAndInstall(local: File, size: Long, set: (ItemState) -> Unit): ItemState {
+    private suspend fun buildAndInstall(local: File, set: (ItemState) -> Unit): ItemState {
         set(ItemState.Building)
         val built = withContext(Dispatchers.IO) { CompanionBuilder(signingKey.get()).build(local, File(workDir, "out")) }
         waitForPlugin(set)
@@ -404,7 +433,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         return when (val outcome = gateway.install(built.apk)) {
             is InstallOutcome.Installed -> {
                 lastInstallMark = SystemClock.elapsedRealtime()
-                lastPace = DeliveryPacing.delayAfter(size).toMillis()
+                lastPace = DeliveryPacing.delayAfter(local.length()).toMillis()
                 ItemState.Installed
             }
             InstallOutcome.Declined -> ItemState.Cancelled
@@ -432,4 +461,5 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         const val INCOMING_DIR = "incoming"
         const val MAX_INCOMING = 200
     }
+
 }
