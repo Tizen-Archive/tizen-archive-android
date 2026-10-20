@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -245,7 +247,14 @@ private fun formatSize(bytes: Long): String =
 
 @Composable
 private fun BottomActions(state: UiState, onInstall: () -> Unit, onCancel: () -> Unit) {
-    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // The app draws edge to edge, so the bar itself keeps clear of the navigation bar and lifts above the keyboard.
+    Column(
+        modifier = Modifier
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (state.states.isNotEmpty()) {
             Text(stringResource(R.string.summary, state.installed, state.failed, state.cancelled), style = MaterialTheme.typography.bodyMedium)
         }
