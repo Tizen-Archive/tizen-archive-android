@@ -414,6 +414,7 @@ private fun describe(state: ItemState): String = when (state) {
     is ItemState.Waiting -> stringResource(R.string.state_waiting, state.secondsLeft)
     ItemState.AwaitingConfirm -> stringResource(R.string.state_confirm)
     ItemState.Installed -> stringResource(R.string.state_done)
+    is ItemState.AlreadySent -> stringResource(R.string.state_already_sent, DateUtils.formatDateTime(LocalContext.current, state.sentAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR))
     ItemState.Cancelled -> stringResource(R.string.state_cancelled)
     ItemState.SignatureConflict -> stringResource(R.string.state_conflict)
     is ItemState.Failed -> stringResource(R.string.state_failed, state.reason)
@@ -434,7 +435,7 @@ private fun BottomActions(state: UiState, onInstall: () -> Unit, onCancel: () ->
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (state.states.isNotEmpty()) {
-            Text(stringResource(R.string.summary, state.installed, state.failed, state.cancelled), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.summary, state.installed, state.failed, state.cancelled, state.skipped), style = MaterialTheme.typography.bodyMedium)
         }
         if (state.installing) {
             OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel)) }

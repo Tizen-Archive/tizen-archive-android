@@ -55,6 +55,9 @@ internal sealed interface ItemState {
     data class Waiting(val secondsLeft: Int) : ItemState
     data object AwaitingConfirm : ItemState
     data object Installed : ItemState
+
+    /** The same version of this package was already sent from this phone. */
+    data class AlreadySent(val sentAt: Long) : ItemState
     data object Cancelled : ItemState
     data class Failed(val reason: String) : ItemState
 
@@ -111,6 +114,7 @@ internal data class UiState(
         get() = if (query.isBlank()) allFiles else allFiles.filter { it.name.contains(query.trim(), ignoreCase = true) }
 
     val installed: Int get() = states.values.count { it is ItemState.Installed }
+    val skipped: Int get() = states.values.count { it is ItemState.AlreadySent }
     val failed: Int get() = states.values.count { it is ItemState.Failed || it is ItemState.SignatureConflict }
     val cancelled: Int get() = states.values.count { it is ItemState.Cancelled }
 }
@@ -389,13 +393,13 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         _state.update { it.copy(folderName = name, scanning = false, files = files) }
     }
 
-    private suspend fun processLocal(file: PackageFile) = processItem(file.uri) { target ->
+    private suspend fun processLocal(file: PackageFile) = processItem(file.uri, skipIfSent = true) { target ->
         val input = context.contentResolver.openInputStream(file.uri) ?: error("Cannot open the file")
         input.use { src -> target.outputStream().use { src.copyTo(it) } }
     }
 
     /** Takes the package ([prepare] writes it to the file), builds a companion, installs it and records the state under [key]. */
-    private suspend fun processItem(key: Uri, prepare: suspend (File) -> Unit) {
+    private suspend fun processItem(key: Uri, skipIfSent: Boolean = false, prepare: suspend (File) -> Unit) {
         fun set(state: ItemState) = _state.update { it.copy(states = it.states + (key to state)) }
         val state = runCatchingItem(::set) {
             set(ItemState.Reading)
@@ -405,9 +409,21 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 workDir.mkdirs()
                 prepare(local)
             }
+            if (skipIfSent) {
+                val sentAt = withContext(Dispatchers.IO) { sentAt(local) }
+                if (sentAt != null) return@runCatchingItem ItemState.AlreadySent(sentAt)
+            }
             buildAndInstall(local, ::set)
         }
         set(state)
+    }
+
+    /** When this very version of the package was already sent from this phone (a companion with the same id and version). */
+    private fun sentAt(local: File): Long? {
+        val info = runCatching { TizenPackageReader.read(local) }.getOrNull() ?: return null
+        return companionRepository.list()
+            .firstOrNull { it.tizenPackageId == info.packageId && it.tizenVersion == info.version }
+            ?.updatedAt
     }
 
     /** Runs [block], turns exceptions into a final item state and always cleans the work directory. */

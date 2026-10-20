@@ -62,12 +62,13 @@
     <string name="reason_expired">Срок действия сертификата истёк.</string>
     <string name="reason_rejected">Часы не принимают подпись этого пакета.</string>
     <string name="reason_unverified">Совместимость с часами не подтверждена.</string>
+    <string name="state_already_sent">Уже отправлено %1$s, пропущено. Чтобы отправить всё равно, нажмите «Отправить снова» на вкладке «На часах».</string>
     <string name="state_confirm">Подтвердите установку на телефоне</string>
     <string name="state_done">Установлено на телефоне; Galaxy Wearable отправит на часы</string>
     <string name="state_cancelled">Отменено</string>
     <string name="state_conflict">Вспомогательное приложение для этого пакета установлено с другим ключом. Сначала удалите его в настройках Android (это удалит приложение и с часов), затем повторите.</string>
     <string name="state_failed">Ошибка: %1$s</string>
-    <string name="summary">Установлено: %1$d, ошибок: %2$d, отменено: %3$d</string>
+    <string name="summary">Установлено: %1$d, пропущено: %4$d, ошибок: %2$d, отменено: %3$d</string>
     <string name="wearable_note">Удаление вспомогательного приложения с телефона может удалить и приложение с часов, но Galaxy Wearable делает это не всегда. Проверьте список приложений в Galaxy Wearable.</string>
     <string name="size_kb">%1$d КБ</string>
     <string name="size_mb">%1$.1f МБ</string>
