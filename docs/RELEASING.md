@@ -36,19 +36,41 @@ The token lives for one hour; keep the private key outside the repository with m
 
 ## F-Droid
 
-Open a merge request to <https://gitlab.com/fdroid/fdroiddata> with `docs/fdroid/dev.tizenarchive.companion.yml`
-(fill the placeholders first). Store texts come from `fastlane/metadata/android`. Things F-Droid checks:
+**Status.** The recipe `docs/fdroid/dev.tizenarchive.companion.yml` was submitted as
+[fdroiddata !53448](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/53448) on 2026-10-20 and closed the same day
+by a maintainer: F-Droid's Inclusion Policy asks for at least three months of active development unless the app has
+proven users, the author already maintains apps on F-Droid, or the app is for an event. The build, recipe and metadata
+raised no objections, and the maintainer invited us to re-open the MR once the criteria are met. The repository was
+created on 2026-10-20, so the next attempt is planned for **late January 2027** or later. GitHub Releases is the only
+other distribution channel.
+
+**Until then:** keep releasing as usual (checklist above) and keep the signing key and the GitHub App key safe. Evidence
+of users helps (release downloads, the "Android app" line in the Tizen Archive download statistics).
+
+**Resubmitting:**
+
+1. Release the current version (the recipe points at a version, a full commit hash and the GitHub release APK).
+2. Update `docs/fdroid/dev.tizenarchive.companion.yml`: `versionName`, `versionCode`, `commit` (full hash),
+   `CurrentVersion`, `CurrentVersionCode`. Normalize it with `fdroid rewritemeta`, run `fdroid lint` and the local
+   build below, then `apksigcopier compare <github apk> --unsigned <fdroid-built apk>`.
+3. Sync the fork `gitlab.com/tizen-archive/fdroiddata` with upstream, update the branch `dev.tizenarchive.companion`
+   (`metadata/dev.tizenarchive.companion.yml`, committed as "New app: Tizen Companion Installer" by Tizen Archive) and
+   re-open !53448 or open a new MR. Text for the description: `docs/fdroid/merge-request.md`; add the development
+   history, the releases and the evidence of users.
+4. GitLab asks the fork for identity verification (phone or card) before it runs CI; do not submit anything, the
+   F-Droid maintainers run the CI themselves (say so in the MR, the text already does).
+
+Things F-Droid checks:
 
 - only free dependencies, no Google Play Services, no tracking: see `gradle/verification-metadata.xml` for the full
   list of resolved artifacts (checksums are verified on every build);
 - dependency metadata blobs are switched off (`dependenciesInfo`);
 - the Gradle distribution and wrapper are pinned (`distributionSha256Sum`);
-- the app needs Samsung's proprietary Galaxy Wearable, hence the `NonFreeDep` anti-feature in the draft;
+- the app needs Samsung's proprietary Galaxy Wearable, hence the `NonFreeDep` anti-feature in the recipe;
 - the build is reproducible, so the recipe sets `Binaries` (the APK of the GitHub release) and `AllowedAPKSigningKeys`
   (SHA-256 of our release certificate): when F-Droid's rebuild matches the GitHub APK it publishes **our signed APK**,
-  and users can switch between GitHub and F-Droid. Check a release before tagging it:
-  `apksigcopier compare <github apk> --unsigned <fdroid-built apk>` (the F-Droid build is `unsigned/<id>_<versionCode>.apk`
-  in the scratch directory).
+  and users can switch between GitHub and F-Droid. The F-Droid build is `unsigned/<id>_<versionCode>.apk` in the
+  scratch directory of the local build.
 
 Store images live in `fastlane/metadata/android/<locale>/images/` (`icon.png`, `phoneScreenshots/`).
 

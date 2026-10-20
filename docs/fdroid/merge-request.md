@@ -1,5 +1,11 @@
 # Merge request for fdroiddata
 
+Status: submitted as <https://gitlab.com/fdroid/fdroiddata/-/merge_requests/53448> on 2026-10-20 and closed by a
+maintainer the same day (the app must have been developed for at least three months). Planned: re-open it, or open a
+new one, from late January 2027. Before that update the recipe (see `docs/RELEASING.md`, "Resubmitting") and
+this text: replace the version and commit below, add the development history, the list of releases and any evidence of
+users.
+
 Title: `New app: Tizen Companion Installer`
 
 Label: `~"New App"` (added by the template). Branch: `dev.tizenarchive.companion`. One file added:
