@@ -174,7 +174,10 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     private var job: Job? = null
 
-    /** Elapsed-time mark of the last companion installed on the phone and how long the plugin needs for it. */
+    /**
+     * Elapsed-time mark of the last companion installed on the phone and how long the plugin needs for it. It outlives a
+     * single operation: an update or a link started right after another installation must wait for the plugin too.
+     */
     private var lastInstallMark: Long? = null
     private var lastPace: Long = 0
 
@@ -228,7 +231,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         }
         val key = companionKey(companion.androidPackage)
         _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
-        lastInstallMark = null
         job = viewModelScope.launch {
             try {
                 processItem(key) { target, _ -> CompanionApk.extractPackage(File(companion.sourceDir), target) }
@@ -280,7 +282,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         }
         val key = companionKey(companion.androidPackage)
         _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
-        lastInstallMark = null
         job = viewModelScope.launch {
             try {
                 processItem(key) { target, set ->
@@ -357,7 +358,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val queue = _state.value.allFiles.filter { it.uri in _state.value.selected }
         if (queue.isEmpty()) return
         _state.update { it.copy(installing = true, states = queue.associate { f -> f.uri to ItemState.Queued }) }
-        lastInstallMark = null
         job = viewModelScope.launch {
             try {
                 for (file in queue) processLocal(file)
@@ -480,7 +480,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val title = confirm.info.name ?: confirm.info.packageId
         fun set(item: ItemState) = _state.update { it.copy(remote = RemoteState.Working(title, item)) }
         _state.update { it.copy(installing = true) }
-        lastInstallMark = null
         job = viewModelScope.launch {
             var final: ItemState = ItemState.Cancelled
             try {
