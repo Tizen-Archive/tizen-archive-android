@@ -35,6 +35,9 @@ approach was verified on a Galaxy Watch (SM-R800, Tizen 5.5) with Galaxy Wearabl
 * Reproducible build: `Binaries` and `AllowedAPKSigningKeys` are set. I checked with apksigcopier that the signature of
   the GitHub release APK can be copied onto the unsigned APK built by fdroidserver (version 0.1.1, commit
   0633d395f4a71326fd9f772b52206fbe4d0040cf).
+* CI note: GitLab asks for identity verification (phone or card) before it runs pipelines in my fork, and I did not submit
+  any. As the template suggests, please trigger the CI on your side. Locally `fdroid lint` and `fdroid rewritemeta` are
+  clean and the build succeeds in the official fdroidserver container.
 * `fdroid lint` passes and `fdroid build` succeeds in the official fdroidserver container.
 * Dependencies are verified by Gradle (`gradle/verification-metadata.xml`), the wrapper distribution is pinned.
 
