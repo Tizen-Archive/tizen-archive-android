@@ -84,6 +84,9 @@ internal sealed interface RemoteState {
     data class Problem(val problem: RemoteProblem) : RemoteState
 }
 
+/** Things the app needs on the phone and cannot find. */
+internal enum class Missing { GALAXY_WEARABLE, GEAR_PLUGIN, INSTALL_PERMISSION }
+
 /** Removing a companion from the phone also removes the app from the watch. */
 internal sealed interface RemovalState {
     data class Confirm(val companion: InstalledCompanion) : RemovalState
@@ -110,6 +113,7 @@ internal data class UiState(
     val installing: Boolean = false,
     val needsInstallPermission: Boolean = false,
     val remote: RemoteState? = null,
+    val missing: Set<Missing> = emptySet(),
     val companions: List<InstalledCompanion> = emptyList(),
     val removal: RemovalState? = null,
 ) {
@@ -166,6 +170,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             folders.load()?.let { openFolder(it) }
         }
         refreshCompanions()
+        refreshMissing()
     }
 
     // ---- Companions on the phone (= apps sent to the watch) ---------------------------------------------
@@ -231,6 +236,19 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     fun refreshInstallPermission() {
         if (context.packageManager.canRequestPackageInstalls()) _state.update { it.copy(needsInstallPermission = false) }
+        refreshMissing()
+    }
+
+    /** Checks for Galaxy Wearable, Samsung's Gear Plugin and the permission to install apps. */
+    private fun refreshMissing() {
+        val manager = context.packageManager
+        fun installed(name: String) = runCatching { manager.getPackageInfo(name, 0) }.isSuccess
+        val missing = buildSet {
+            if (!installed(GALAXY_WEARABLE)) add(Missing.GALAXY_WEARABLE)
+            if (!installed(GEAR_PLUGIN)) add(Missing.GEAR_PLUGIN)
+            if (!manager.canRequestPackageInstalls()) add(Missing.INSTALL_PERMISSION)
+        }
+        _state.update { it.copy(missing = missing) }
     }
 
     fun setQuery(query: String) = _state.update { it.copy(query = query) }
@@ -510,6 +528,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private companion object {
+        const val GALAXY_WEARABLE = "com.samsung.android.app.watchmanager"
+        const val GEAR_PLUGIN = "com.samsung.android.geargplugin"
         const val INCOMING_DIR = "incoming"
         const val MAX_INCOMING = 200
         const val MAX_PREVIEWS = 1000
