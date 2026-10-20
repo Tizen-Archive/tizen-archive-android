@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tizen Companion Installer</string>
+    <string name="choose_folder">Choose folder</string>
+    <string name="change_folder">Change folder</string>
+    <string name="no_folder">Choose a folder with .wgt and .tpk files</string>
+    <string name="scanning">Scanning…</string>
+    <plurals name="files_found">
+        <item quantity="one">%1$d package found</item>
+        <item quantity="other">%1$d packages found</item>
+    </plurals>
+    <string name="search">Search by file name</string>
+    <string name="select_all">Select all</string>
+    <string name="clear_selection">Clear selection</string>
+    <string name="install_selected">Install selected (%1$d)</string>
+    <string name="cancel">Cancel</string>
+    <string name="allow_unknown_title">Allow installing apps</string>
+    <string name="allow_unknown_message">Android must allow this app to install the small helper app that carries each package to the watch. Enable the permission, then come back and press the button again.</string>
+    <string name="open_settings">Open settings</string>
+    <string name="state_queued">Waiting</string>
+    <string name="state_reading">Reading package</string>
+    <string name="state_building">Building helper app</string>
+    <string name="state_waiting">Waiting %1$d s so Galaxy Wearable can finish the previous package</string>
+    <string name="state_confirm">Confirm the installation on the phone</string>
+    <string name="state_done">Installed on the phone; Galaxy Wearable sends it to the watch</string>
+    <string name="state_cancelled">Cancelled</string>
+    <string name="state_conflict">A helper app for this package was installed with a different key. Uninstall it in Android settings first (this also removes the app from the watch), then try again.</string>
+    <string name="state_failed">Failed: %1$s</string>
+    <string name="summary">Installed: %1$d, failed: %2$d, cancelled: %3$d</string>
+    <string name="wearable_note">Do not uninstall helper apps while the watch is connected: that also removes the app from the watch.</string>
+    <string name="size_kb">%1$d KB</string>
+    <string name="size_mb">%1$.1f MB</string>
+</resources>

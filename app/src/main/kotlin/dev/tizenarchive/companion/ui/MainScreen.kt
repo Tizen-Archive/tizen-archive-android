@@ -1,0 +1,191 @@
+package dev.tizenarchive.companion.ui
+
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.tizenarchive.companion.R
+import dev.tizenarchive.companion.files.PackageFile
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MainScreen(viewModel: MainViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) viewModel.onFolderPicked(uri)
+    }
+    val context = LocalContext.current
+
+    Scaffold(
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
+        bottomBar = {
+            BottomActions(
+                state = state,
+                onInstall = viewModel::installSelected,
+                onCancel = viewModel::cancel,
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FolderCard(state, onPick = { picker.launch(null) })
+            if (state.files.isNotEmpty()) {
+                OutlinedTextField(
+                    value = state.query,
+                    onValueChange = viewModel::setQuery,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.search)) },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = viewModel::selectAllVisible, enabled = !state.installing) {
+                        Text(stringResource(R.string.select_all))
+                    }
+                    OutlinedButton(onClick = viewModel::clearSelection, enabled = !state.installing) {
+                        Text(stringResource(R.string.clear_selection))
+                    }
+                }
+            }
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                items(state.visibleFiles, key = { it.uri.toString() }) { file ->
+                    FileRow(
+                        file = file,
+                        checked = file.uri in state.selected,
+                        enabled = !state.installing,
+                        itemState = state.states[file.uri],
+                        onToggle = { viewModel.toggle(file.uri) },
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+
+    if (state.needsInstallPermission) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissPermissionDialog,
+            title = { Text(stringResource(R.string.allow_unknown_title)) },
+            text = { Text(stringResource(R.string.allow_unknown_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")),
+                    )
+                }) { Text(stringResource(R.string.open_settings)) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissPermissionDialog) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun FolderCard(state: UiState, onPick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                state.scanning -> Text(stringResource(R.string.scanning))
+                state.folderName == null -> Text(stringResource(R.string.no_folder))
+                else -> Text("${state.folderName} — " + pluralStringResource(R.plurals.files_found, state.files.size, state.files.size))
+            }
+            Button(onClick = onPick, enabled = !state.installing) {
+                Text(stringResource(if (state.folderName == null) R.string.choose_folder else R.string.change_folder))
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileRow(file: PackageFile, checked: Boolean, enabled: Boolean, itemState: ItemState?, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onToggle)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(file.name, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = itemState?.let { describe(it) } ?: formatSize(file.size),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (itemState is ItemState.Failed || itemState is ItemState.SignatureConflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun describe(state: ItemState): String = when (state) {
+    ItemState.Queued -> stringResource(R.string.state_queued)
+    ItemState.Reading -> stringResource(R.string.state_reading)
+    ItemState.Building -> stringResource(R.string.state_building)
+    is ItemState.Waiting -> stringResource(R.string.state_waiting, state.secondsLeft)
+    ItemState.AwaitingConfirm -> stringResource(R.string.state_confirm)
+    ItemState.Installed -> stringResource(R.string.state_done)
+    ItemState.Cancelled -> stringResource(R.string.state_cancelled)
+    ItemState.SignatureConflict -> stringResource(R.string.state_conflict)
+    is ItemState.Failed -> stringResource(R.string.state_failed, state.reason)
+}
+
+@Composable
+private fun formatSize(bytes: Long): String =
+    if (bytes >= 1024 * 1024) stringResource(R.string.size_mb, bytes / (1024.0 * 1024.0)) else stringResource(R.string.size_kb, (bytes / 1024).toInt())
+
+@Composable
+private fun BottomActions(state: UiState, onInstall: () -> Unit, onCancel: () -> Unit) {
+    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (state.states.isNotEmpty()) {
+            Text(stringResource(R.string.summary, state.installed, state.failed, state.cancelled), style = MaterialTheme.typography.bodyMedium)
+        }
+        if (state.installed > 0) {
+            Text(stringResource(R.string.wearable_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (state.installing) {
+            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel)) }
+        } else {
+            Button(onClick = onInstall, enabled = state.selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.install_selected, state.selected.size))
+            }
+        }
+    }
+}

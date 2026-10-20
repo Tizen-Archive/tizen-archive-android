@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tizen Companion Installer</string>
+    <string name="choose_folder">Выбрать папку</string>
+    <string name="change_folder">Сменить папку</string>
+    <string name="no_folder">Выберите папку с файлами .wgt и .tpk</string>
+    <string name="scanning">Сканирование…</string>
+    <plurals name="files_found">
+        <item quantity="one">Найден %1$d пакет</item>
+        <item quantity="few">Найдено %1$d пакета</item>
+        <item quantity="many">Найдено %1$d пакетов</item>
+        <item quantity="other">Найдено %1$d пакета</item>
+    </plurals>
+    <string name="search">Поиск по имени файла</string>
+    <string name="select_all">Выбрать все</string>
+    <string name="clear_selection">Снять выбор</string>
+    <string name="install_selected">Установить выбранные (%1$d)</string>
+    <string name="cancel">Отмена</string>
+    <string name="allow_unknown_title">Разрешите установку приложений</string>
+    <string name="allow_unknown_message">Android должен разрешить этому приложению ставить маленькое вспомогательное приложение, которое доставляет каждый пакет на часы. Включите разрешение, вернитесь и нажмите кнопку ещё раз.</string>
+    <string name="open_settings">Открыть настройки</string>
+    <string name="state_queued">Ожидание</string>
+    <string name="state_reading">Чтение пакета</string>
+    <string name="state_building">Сборка вспомогательного приложения</string>
+    <string name="state_waiting">Ожидание %1$d с: Galaxy Wearable должен закончить с предыдущим пакетом</string>
+    <string name="state_confirm">Подтвердите установку на телефоне</string>
+    <string name="state_done">Установлено на телефоне; Galaxy Wearable отправит на часы</string>
+    <string name="state_cancelled">Отменено</string>
+    <string name="state_conflict">Вспомогательное приложение для этого пакета установлено с другим ключом. Сначала удалите его в настройках Android (это удалит приложение и с часов), затем повторите.</string>
+    <string name="state_failed">Ошибка: %1$s</string>
+    <string name="summary">Установлено: %1$d, ошибок: %2$d, отменено: %3$d</string>
+    <string name="wearable_note">Не удаляйте вспомогательные приложения при подключённых часах: вместе с ними с часов удалится и само приложение.</string>
+    <string name="size_kb">%1$d КБ</string>
+    <string name="size_mb">%1$.1f МБ</string>
+</resources>
