@@ -1,0 +1,19 @@
+Installs Tizen watch packages (.wgt and .tpk) on a Samsung Galaxy Watch or Gear watch through the Galaxy Wearable app, without a computer and without developer mode on the watch.
+
+How it works: for every package the app builds a tiny helper app that carries the package, signs it with a key that never leaves your phone and asks Android to install it. Galaxy Wearable notices the helper app and sends the package to the watch over Bluetooth.
+
+Features:
+• Pick a folder, search, select packages and install them in one queue.
+• Works with the "Install on the watch" button of the Tizen Archive catalog (tizen-archive.com): the package is downloaded and verified (SHA-256 and size) before it is installed.
+• The signing key lives in the Android Keystore; nothing is uploaded anywhere, there are no ads, analytics or trackers.
+
+Requirements:
+• Android 8.0 or newer with Galaxy Wearable and Samsung's Gear Plugin installed, and a watch connected over Bluetooth.
+• Permission to install apps from this app (Android asks for it once).
+• The package must be accepted by the watch: a .tpk has to be signed with a certificate the watch trusts. The app cannot check this; if the watch refuses a package, Galaxy Wearable shows an error.
+
+Good to know:
+• Android asks you to confirm the installation of every helper app.
+• Galaxy Wearable handles one package at a time, so the app waits between installations; a large package can take minutes over Bluetooth.
+• Do not uninstall a helper app while the watch is connected: that removes the app from the watch as well. Turn Bluetooth off first if you only want to free space on the phone, and test with one package before cleaning up all of them.
+• The app only talks to the network when you open an install link from the Tizen Archive website.
