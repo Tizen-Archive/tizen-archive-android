@@ -21,6 +21,7 @@ import dev.tizenarchive.companion.catalog.InstallLinkParser
 import dev.tizenarchive.companion.catalog.InvalidLinkException
 import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.catalog.Selection
+import dev.tizenarchive.companion.catalog.VersionCompare
 import dev.tizenarchive.companion.catalog.VersionInfo
 import dev.tizenarchive.companion.companions.CompanionRepository
 import dev.tizenarchive.companion.companions.InstalledCompanion
@@ -85,6 +86,17 @@ internal sealed interface RemoteState {
     data class Problem(val problem: RemoteProblem) : RemoteState
 }
 
+/** A newer version of a sent package that the catalog can provide. */
+internal data class UpdateInfo(val version: String, val artifact: Artifact)
+
+internal sealed interface UpdateCheck {
+    data object Idle : UpdateCheck
+    data object Checking : UpdateCheck
+
+    /** [failed] packages could not be checked (no connection or an unexpected answer). */
+    data class Done(val checked: Int, val failed: Int) : UpdateCheck
+}
+
 /** Things the app needs on the phone and cannot find. */
 internal enum class Missing { GALAXY_WEARABLE, GEAR_PLUGIN, INSTALL_PERMISSION }
 
@@ -115,6 +127,9 @@ internal data class UiState(
     val needsInstallPermission: Boolean = false,
     val remote: RemoteState? = null,
     val missing: Set<Missing> = emptySet(),
+    /** Newer catalog versions of sent packages, by companion package name. */
+    val updates: Map<String, UpdateInfo> = emptyMap(),
+    val updateCheck: UpdateCheck = UpdateCheck.Idle,
     val companions: List<InstalledCompanion> = emptyList(),
     val removal: RemovalState? = null,
 ) {
@@ -216,7 +231,72 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         lastInstallMark = null
         job = viewModelScope.launch {
             try {
-                processItem(key) { target -> CompanionApk.extractPackage(File(companion.sourceDir), target) }
+                processItem(key) { target, _ -> CompanionApk.extractPackage(File(companion.sourceDir), target) }
+            } finally {
+                _state.update { it.copy(installing = false) }
+                refreshCompanions()
+            }
+        }
+    }
+
+    // ---- Updates from the catalog ---------------------------------------------------------------------------
+
+    /** Asks the catalog for the latest version of every sent package; runs only when the user taps the button. */
+    fun checkUpdates() {
+        if (_state.value.updateCheck == UpdateCheck.Checking || _state.value.installing) return
+        _state.update { it.copy(updateCheck = UpdateCheck.Checking, updates = emptyMap()) }
+        viewModelScope.launch {
+            val found = mutableMapOf<String, UpdateInfo>()
+            var checked = 0
+            var failed = 0
+            for (companion in _state.value.companions) {
+                val id = companion.tizenPackageId ?: continue
+                val installed = companion.tizenVersion ?: continue
+                checked++
+                try {
+                    val latest = withContext(Dispatchers.IO) { catalog.version(id, null) }
+                    val selection = ArtifactSelection.select(latest) as? Selection.Found ?: continue
+                    if (VersionCompare.isNewer(latest.version, installed)) {
+                        found[companion.androidPackage] = UpdateInfo(latest.version, selection.artifact)
+                    }
+                } catch (e: CatalogException) {
+                    // A package that is not in the catalog is not an error; anything else is counted
+                    if (e.error != CatalogError.NOT_FOUND) failed++
+                } catch (e: IllegalArgumentException) {
+                    // The id has characters the catalog does not take; nothing to look up
+                }
+            }
+            _state.update { it.copy(updates = found, updateCheck = UpdateCheck.Done(checked, failed)) }
+        }
+    }
+
+    /** Downloads the newer version and sends it to the watch as an update of the companion. */
+    fun update(companion: InstalledCompanion) {
+        val update = _state.value.updates[companion.androidPackage] ?: return
+        if (_state.value.installing) return
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            _state.update { it.copy(needsInstallPermission = true) }
+            return
+        }
+        val key = companionKey(companion.androidPackage)
+        _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
+        lastInstallMark = null
+        job = viewModelScope.launch {
+            try {
+                processItem(key) { target, set ->
+                    set(ItemState.Downloading(0))
+                    var lastPercent = -1
+                    catalog.download(update.artifact, target) { done ->
+                        val percent = if (update.artifact.size > 0) (done * 100 / update.artifact.size).toInt() else 100
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            set(ItemState.Downloading(percent))
+                        }
+                    }
+                }
+                if (_state.value.states[key] is ItemState.Installed) {
+                    _state.update { it.copy(updates = it.updates - companion.androidPackage) }
+                }
             } finally {
                 _state.update { it.copy(installing = false) }
                 refreshCompanions()
@@ -461,13 +541,13 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private suspend fun processLocal(file: PackageFile) = processItem(file.uri, skipIfSent = true) { target ->
+    private suspend fun processLocal(file: PackageFile) = processItem(file.uri, skipIfSent = true) { target, _ ->
         val input = context.contentResolver.openInputStream(file.uri) ?: error("Cannot open the file")
         input.use { src -> target.outputStream().use { src.copyTo(it) } }
     }
 
     /** Takes the package ([prepare] writes it to the file), builds a companion, installs it and records the state under [key]. */
-    private suspend fun processItem(key: Uri, skipIfSent: Boolean = false, prepare: suspend (File) -> Unit) {
+    private suspend fun processItem(key: Uri, skipIfSent: Boolean = false, prepare: suspend (File, (ItemState) -> Unit) -> Unit) {
         fun set(state: ItemState) = _state.update { it.copy(states = it.states + (key to state)) }
         val state = runCatchingItem(::set) {
             set(ItemState.Reading)
@@ -475,7 +555,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             withContext(Dispatchers.IO) {
                 workDir.deleteRecursively()
                 workDir.mkdirs()
-                prepare(local)
+                prepare(local, ::set)
             }
             if (skipIfSent) {
                 val sentAt = withContext(Dispatchers.IO) { sentAt(local) }
