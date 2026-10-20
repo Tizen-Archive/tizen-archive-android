@@ -62,33 +62,38 @@ internal fun MainScreen(viewModel: MainViewModel) {
             )
         },
     ) { padding ->
-        Column(
+        // One scrolling list: on a small screen or with a long status text nothing is pushed out of view.
+        LazyColumn(
             modifier = Modifier
                 .padding(padding)
                 .padding(horizontal = 16.dp)
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FolderCard(state, onPick = { picker.launch(null) })
+            item { FolderCard(state, onPick = { picker.launch(null) }) }
             if (state.files.isNotEmpty()) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = viewModel::setQuery,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.search)) },
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = viewModel::selectAllVisible, enabled = !state.installing) {
-                        Text(stringResource(R.string.select_all))
-                    }
-                    OutlinedButton(onClick = viewModel::clearSelection, enabled = !state.installing) {
-                        Text(stringResource(R.string.clear_selection))
+                item {
+                    OutlinedTextField(
+                        value = state.query,
+                        onValueChange = viewModel::setQuery,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.search)) },
+                    )
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = viewModel::selectAllVisible, enabled = !state.installing) {
+                            Text(stringResource(R.string.select_all))
+                        }
+                        OutlinedButton(onClick = viewModel::clearSelection, enabled = !state.installing) {
+                            Text(stringResource(R.string.clear_selection))
+                        }
                     }
                 }
             }
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(state.visibleFiles, key = { it.uri.toString() }) { file ->
+            items(state.visibleFiles, key = { it.uri.toString() }) { file ->
+                Column {
                     FileRow(
                         file = file,
                         checked = file.uri in state.selected,
@@ -97,6 +102,15 @@ internal fun MainScreen(viewModel: MainViewModel) {
                         onToggle = { viewModel.toggle(file.uri) },
                     )
                     HorizontalDivider()
+                }
+            }
+            if (state.installed > 0) {
+                item {
+                    Text(
+                        stringResource(R.string.wearable_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -257,9 +271,6 @@ private fun BottomActions(state: UiState, onInstall: () -> Unit, onCancel: () ->
     ) {
         if (state.states.isNotEmpty()) {
             Text(stringResource(R.string.summary, state.installed, state.failed, state.cancelled), style = MaterialTheme.typography.bodyMedium)
-        }
-        if (state.installed > 0) {
-            Text(stringResource(R.string.wearable_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (state.installing) {
             OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel)) }
