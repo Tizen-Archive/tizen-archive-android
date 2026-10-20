@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -114,6 +115,9 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (state.missing.isNotEmpty()) {
+                item { MissingCard(state.missing) }
+            }
             item { FolderCard(state, onPick = { picker.launch(null) }) }
             if (state.incomingRejected > 0) {
                 item {
@@ -374,6 +378,33 @@ private fun describe(problem: RemoteProblem): String = when (problem) {
             NotInstallableReason.UNVERIFIED -> R.string.reason_unverified
         },
     )
+}
+
+@Composable
+private fun MissingCard(missing: Set<Missing>) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.missing_title), style = MaterialTheme.typography.titleSmall)
+            if (Missing.GALAXY_WEARABLE in missing) {
+                Text(stringResource(R.string.missing_wearable))
+                OutlinedButton(onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.samsung.android.app.watchmanager")))
+                }) { Text(stringResource(R.string.missing_open_store)) }
+            } else if (Missing.GEAR_PLUGIN in missing) {
+                Text(stringResource(R.string.missing_plugin))
+            }
+            if (Missing.INSTALL_PERMISSION in missing) {
+                Text(stringResource(R.string.missing_permission))
+                OutlinedButton(onClick = {
+                    context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
+                }) { Text(stringResource(R.string.open_settings)) }
+            }
+        }
+    }
 }
 
 @Composable

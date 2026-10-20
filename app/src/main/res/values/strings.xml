@@ -35,6 +35,11 @@
     <string name="remove_done_title">Removed from the phone</string>
     <string name="remove_done_message">The helper app is removed. Galaxy Wearable should remove the app from the watch, but this does not always happen: check the app list in Galaxy Wearable.</string>
     <string name="open_wearable">Open Galaxy Wearable</string>
+    <string name="missing_title">Before you start</string>
+    <string name="missing_wearable">Galaxy Wearable is not installed. It delivers packages to the watch and manages the watch.</string>
+    <string name="missing_open_store">Get Galaxy Wearable</string>
+    <string name="missing_plugin">Samsung\'s Gear Plugin is not installed. Galaxy Wearable adds it when you connect a Galaxy Watch or Gear watch: connect your watch there first.</string>
+    <string name="missing_permission">Android must allow this app to install the small helper app that carries each package to the watch.</string>
     <string name="state_queued">Waiting</string>
     <string name="state_reading">Reading package</string>
     <string name="state_building">Building helper app</string>

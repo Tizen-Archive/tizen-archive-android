@@ -39,6 +39,11 @@
     <string name="remove_done_title">Удалено с телефона</string>
     <string name="remove_done_message">Вспомогательное приложение удалено. Galaxy Wearable должен удалить приложение с часов, но так бывает не всегда: проверьте список приложений в Galaxy Wearable.</string>
     <string name="open_wearable">Открыть Galaxy Wearable</string>
+    <string name="missing_title">Перед началом</string>
+    <string name="missing_wearable">Galaxy Wearable не установлен. Он доставляет пакеты на часы и управляет ими.</string>
+    <string name="missing_open_store">Установить Galaxy Wearable</string>
+    <string name="missing_plugin">Не установлен Gear Plugin от Samsung. Galaxy Wearable добавляет его при подключении часов Galaxy Watch или Gear: сначала подключите часы там.</string>
+    <string name="missing_permission">Android должен разрешить этому приложению ставить маленькое вспомогательное приложение, которое доставляет каждый пакет на часы.</string>
     <string name="state_queued">Ожидание</string>
     <string name="state_reading">Чтение пакета</string>
     <string name="state_building">Сборка вспомогательного приложения</string>

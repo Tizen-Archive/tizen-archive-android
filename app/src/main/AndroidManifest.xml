@@ -9,6 +9,7 @@
     <queries>
         <!-- To offer opening Galaxy Wearable, where the apps on the watch can be managed -->
         <package android:name="com.samsung.android.app.watchmanager" />
+        <package android:name="com.samsung.android.geargplugin" />
         <intent>
             <action android:name="dev.tizenarchive.companion.COMPANION" />
         </intent>
