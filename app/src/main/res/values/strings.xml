@@ -27,6 +27,16 @@
     <string name="watch_empty">Nothing sent yet. Helper apps made by older versions of this app are not shown; install the package again to see it here.</string>
     <string name="watch_sent">Sent %1$s</string>
     <string name="resend_to_watch">Send again</string>
+    <string name="check_updates">Check for updates</string>
+    <string name="checking_updates">Checking…</string>
+    <string name="updates_none">All sent apps are up to date.</string>
+    <string name="updates_error">Could not check %1$d apps: check the internet connection and try again.</string>
+    <plurals name="updates_found">
+        <item quantity="one">%1$d update available.</item>
+        <item quantity="other">%1$d updates available.</item>
+    </plurals>
+    <string name="update_available">Newer version in the catalog: %1$s</string>
+    <string name="update_to">Update to %1$s</string>
     <string name="remove_from_watch">Remove from the watch</string>
     <string name="remove_title">Remove “%1$s”?</string>
     <string name="remove_message">Android will remove the helper app and Galaxy Wearable should remove the app from the watch. This does not always happen: afterwards check the app list in Galaxy Wearable and remove the app there if it is still on the watch.</string>

@@ -129,6 +129,10 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 state.companions,
                 states = state.states,
                 installing = state.installing,
+                updates = state.updates,
+                updateCheck = state.updateCheck,
+                onCheckUpdates = viewModel::checkUpdates,
+                onUpdate = viewModel::update,
                 onResend = viewModel::resend,
                 onCancel = viewModel::cancel,
                 onRemove = viewModel::askRemoval,
@@ -251,6 +255,10 @@ private fun WatchTab(
     companions: List<InstalledCompanion>,
     states: Map<Uri, ItemState>,
     installing: Boolean,
+    updates: Map<String, UpdateInfo>,
+    updateCheck: UpdateCheck,
+    onCheckUpdates: () -> Unit,
+    onUpdate: (InstalledCompanion) -> Unit,
     onResend: (InstalledCompanion) -> Unit,
     onCancel: () -> Unit,
     onRemove: (InstalledCompanion) -> Unit,
@@ -272,6 +280,22 @@ private fun WatchTab(
         }
         if (companions.isEmpty()) {
             item { Text(stringResource(R.string.watch_empty), modifier = Modifier.padding(top = 16.dp)) }
+        } else {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OutlinedButton(onClick = onCheckUpdates, enabled = updateCheck != UpdateCheck.Checking && !installing) {
+                        Text(stringResource(if (updateCheck == UpdateCheck.Checking) R.string.checking_updates else R.string.check_updates))
+                    }
+                    if (updateCheck is UpdateCheck.Done) {
+                        val text = when {
+                            updateCheck.failed > 0 -> stringResource(R.string.updates_error, updateCheck.failed)
+                            updates.isEmpty() -> stringResource(R.string.updates_none)
+                            else -> pluralStringResource(R.plurals.updates_found, updates.size, updates.size)
+                        }
+                        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
         items(companions, key = { it.androidPackage }) { companion ->
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -291,11 +315,22 @@ private fun WatchTab(
                             color = if (itemState is ItemState.Failed || itemState is ItemState.SignatureConflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    val update = updates[companion.androidPackage]
+                    if (update != null && itemState == null) {
+                        Text(
+                            stringResource(R.string.update_available, update.version),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     val working = installing && itemState != null && itemState !is ItemState.Installed && itemState !is ItemState.Failed && itemState !is ItemState.Cancelled && itemState !is ItemState.SignatureConflict
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (working) {
                             OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
                         } else {
+                            if (update != null) {
+                                Button(onClick = { onUpdate(companion) }, enabled = !installing) { Text(stringResource(R.string.update_to, update.version)) }
+                            }
                             OutlinedButton(onClick = { onResend(companion) }, enabled = !installing) { Text(stringResource(R.string.resend_to_watch)) }
                             OutlinedButton(onClick = { onRemove(companion) }, enabled = !installing) { Text(stringResource(R.string.remove_from_watch)) }
                         }

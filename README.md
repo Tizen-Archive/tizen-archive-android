@@ -13,7 +13,14 @@ sends the package to the watch over Bluetooth.
 - Handles the "Install on the watch" link of the [Tizen Archive](https://tizen-archive.com) catalog
   (`tizen-archive://install?package=<id>[&version=<v>]`): the package is looked up, downloaded and verified (SHA-256 and
   size) before it is installed. The catalog address is fixed in the app; a link can never change it.
-- No ads, analytics or trackers. The network is used only for the catalog link above.
+- Open a downloaded `.wgt`/`.tpk` from a file manager ("Open with") or share it to the app.
+- Package names, versions and icons are shown in the list; packages already sent are skipped.
+- The "On the watch" tab lists what this phone sent to the watch (read from the helper apps themselves, so the list
+  survives app updates), sends a package again, checks the catalog for newer versions and updates them, and removes helper
+  apps.
+- A card tells what is missing (Galaxy Wearable, Gear Plugin, the install permission); the screen stays on while a queue
+  runs and a notification reports its end.
+- No ads, analytics or trackers. The network is used only for the catalog link above and for the update check you start.
 - English and Russian interface.
 
 ## Requirements
