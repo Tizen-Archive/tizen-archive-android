@@ -37,6 +37,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.tizenarchive.companion.R
+import dev.tizenarchive.companion.catalog.CatalogError
+import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.files.PackageFile
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,6 +100,10 @@ internal fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    state.remote?.let { remote ->
+        RemoteDialog(remote, onConfirm = viewModel::confirmRemote, onDismiss = viewModel::dismissRemote)
+    }
+
     if (state.needsInstallPermission) {
         AlertDialog(
             onDismissRequest = viewModel::dismissPermissionDialog,
@@ -115,6 +121,71 @@ internal fun MainScreen(viewModel: MainViewModel) {
             },
         )
     }
+}
+
+@Composable
+private fun RemoteDialog(remote: RemoteState, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val title: String
+    val text: String
+    var confirmLabel: String? = null
+    var dismissLabel = stringResource(R.string.cancel)
+    when (remote) {
+        is RemoteState.Resolving -> {
+            title = stringResource(R.string.remote_resolving_title)
+            text = remote.packageId
+        }
+        is RemoteState.Confirm -> {
+            title = remote.info.name ?: remote.info.packageId
+            text = stringResource(R.string.remote_confirm_text, remote.info.version, formatSize(remote.artifact.size))
+            confirmLabel = stringResource(R.string.install_on_watch)
+        }
+        is RemoteState.Working -> {
+            title = remote.title
+            text = describe(remote.item)
+        }
+        is RemoteState.Finished -> {
+            title = remote.title
+            text = describe(remote.item)
+            dismissLabel = stringResource(R.string.ok)
+        }
+        is RemoteState.Problem -> {
+            title = stringResource(R.string.remote_problem_title)
+            text = describe(remote.problem)
+            dismissLabel = stringResource(R.string.ok)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = { confirmLabel?.let { TextButton(onClick = onConfirm) { Text(it) } } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(dismissLabel) } },
+    )
+}
+
+@Composable
+private fun describe(problem: RemoteProblem): String = when (problem) {
+    RemoteProblem.InvalidLink -> stringResource(R.string.problem_invalid_link)
+    RemoteProblem.Busy -> stringResource(R.string.problem_busy)
+    is RemoteProblem.Catalog -> stringResource(
+        when (problem.error) {
+            CatalogError.NOT_FOUND -> R.string.problem_not_found
+            CatalogError.NETWORK -> R.string.problem_network
+            CatalogError.BAD_RESPONSE -> R.string.problem_bad_response
+            CatalogError.SIZE_MISMATCH, CatalogError.CHECKSUM_MISMATCH -> R.string.problem_corrupted
+            CatalogError.TOO_LARGE -> R.string.problem_too_large
+        },
+    )
+    is RemoteProblem.NotInstallable -> stringResource(
+        when (problem.reason) {
+            NotInstallableReason.NO_BUILDS -> R.string.reason_no_builds
+            NotInstallableReason.NOT_DOWNLOADABLE -> R.string.reason_not_downloadable
+            NotInstallableReason.DEVICE_BOUND -> R.string.reason_device_bound
+            NotInstallableReason.EXPIRED -> R.string.reason_expired
+            NotInstallableReason.REJECTED_BY_WATCH -> R.string.reason_rejected
+            NotInstallableReason.UNVERIFIED -> R.string.reason_unverified
+        },
+    )
 }
 
 @Composable
@@ -158,6 +229,7 @@ private fun FileRow(file: PackageFile, checked: Boolean, enabled: Boolean, itemS
 private fun describe(state: ItemState): String = when (state) {
     ItemState.Queued -> stringResource(R.string.state_queued)
     ItemState.Reading -> stringResource(R.string.state_reading)
+    is ItemState.Downloading -> stringResource(R.string.state_downloading, state.percent)
     ItemState.Building -> stringResource(R.string.state_building)
     is ItemState.Waiting -> stringResource(R.string.state_waiting, state.secondsLeft)
     ItemState.AwaitingConfirm -> stringResource(R.string.state_confirm)

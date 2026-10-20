@@ -10,6 +10,14 @@ Status: early, works on a device. `core` (JVM) has the binary manifest generator
 the Tizen package reader, naming and signing; `app` is a Compose app that picks a folder, builds and signs
 one companion per package with an Android Keystore key and installs it through `PackageInstaller`.
 
+## Link from the website
+
+The app handles `tizen-archive://install?package=<id>[&version=<v>]` (the "Install on the watch" button of
+the catalog). It looks the package up in the catalog, asks for confirmation, downloads it (SHA-256 and size are
+verified) and installs it like a package picked from a folder. The catalog address is fixed in the app
+(`https://tizen-archive.com`); for local development build with
+`./gradlew :app:assembleDebug -PcatalogUrl=http://<host>:8080` (debug builds allow plain HTTP).
+
 ## Build
 
 ```
