@@ -1,0 +1,6 @@
+Tizen Companion Installer
+Copyright 2026 Tizen Archive
+
+This product includes software developed by third parties under the Apache License 2.0
+(AndroidX, Jetpack Compose, Kotlin, kotlinx.coroutines, Android apksig) and the MIT License
+(Bouncy Castle, used in tests only).
