@@ -47,12 +47,28 @@ Open a merge request to <https://gitlab.com/fdroid/fdroiddata> with `docs/fdroid
 
 Screenshots (`fastlane/metadata/android/<locale>/images/phoneScreenshots/`) are not included yet.
 
+## Checking the F-Droid build locally
+
+`fdroid lint` and `fdroid build` run in the official container. Put `docs/fdroid/dev.tizenarchive.companion.yml`
+into `metadata/` of a scratch directory next to the `config/` folder of fdroiddata (`antiFeatures.yml`,
+`categories.yml` and the icons they reference), clone the repository into `build/dev.tizenarchive.companion`, then:
+
+```
+docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
+  -e GIT_CONFIG_VALUE_0='*' -v "$PWD":/repo registry.gitlab.com/fdroid/docker-executable-fdroidserver:master \
+  build -v -l --no-tarball dev.tizenarchive.companion
+```
+
+The build resolves dependencies with an empty Gradle cache, so metadata regenerated only from incremental local
+builds can be incomplete. Always refresh it with a fresh Gradle user home (see below).
+
 ## Updating dependencies
 
 After changing a version in `gradle/libs.versions.toml` refresh the checksums:
 
 ```
-./gradlew --write-verification-metadata sha256 check :app:assembleRelease :app:assembleDebugAndroidTest
+GRADLE_USER_HOME=$(mktemp -d) ./gradlew --write-verification-metadata sha256 \
+  assembleRelease check :app:assembleDebugAndroidTest
 ```
 
 and review the diff of `gradle/verification-metadata.xml`.
