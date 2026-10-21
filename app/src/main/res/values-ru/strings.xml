@@ -87,6 +87,12 @@
     <string name="state_cancelled">Отменено</string>
     <string name="state_conflict">Вспомогательное приложение для этого пакета установлено с другим ключом. Сначала удалите его в настройках Android (это удалит приложение и с часов), затем повторите.</string>
     <string name="state_failed">Ошибка: %1$s</string>
+    <string name="sig_unsigned">Нет подписи дистрибьютора: часы, скорее всего, отклонят этот пакет.</string>
+    <string name="sig_forged">Подпись выдаёт себя за удостоверяющий центр Samsung, но цепочка сертификатов не настоящая: часы отклонят пакет.</string>
+    <string name="sig_untrusted">Подписан сертификатом, которому часы Tizen не доверяют (Samsung VD или Tizen SDK): часы отклонят пакет.</string>
+    <string name="sig_expired">Сертификат разработчика истёк %1$s: часы отклонят пакет.</string>
+    <string name="sig_device_bound">Сертификат разработчика для определённых часов (указано: %1$d), действует до %2$s: пакет встанет только на эти часы.</string>
+    <string name="sig_device_bound_unknown">Сертификат разработчика для определённых часов, действует до %1$s: пакет встанет только на эти часы.</string>
     <string name="summary">Установлено: %1$d, пропущено: %4$d, ошибок: %2$d, отменено: %3$d</string>
     <string name="wearable_note">Удаление вспомогательного приложения с телефона может удалить и приложение с часов, но Galaxy Wearable делает это не всегда. Проверьте список приложений в Galaxy Wearable.</string>
     <string name="size_kb">%1$d КБ</string>

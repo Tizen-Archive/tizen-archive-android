@@ -17,6 +17,9 @@ sends the package to the watch over Bluetooth.
   size) before it is installed. The catalog address is fixed in the app; a link can never change it.
 - Open a downloaded `.wgt`/`.tpk` from a file manager ("Open with") or share it to the app.
 - Package names, versions and icons are shown in the list; packages already sent are skipped.
+- A package the watch is expected to refuse (no distributor signature, a forged or untrusted certificate, an expired or
+  device-bound developer certificate) is marked in the list before you send it. This is a prediction from the
+  certificate chain (known Samsung CAs), not a full signature check, and it never blocks sending.
 - The "On the watch" tab lists what this phone sent to the watch (read from the helper apps themselves, so the list
   survives app updates), sends a package again, checks the catalog for newer versions and updates them, and removes helper
   apps.

@@ -81,6 +81,12 @@
     <string name="state_cancelled">Cancelled</string>
     <string name="state_conflict">A helper app for this package was installed with a different key. Uninstall it in Android settings first (this also removes the app from the watch), then try again.</string>
     <string name="state_failed">Failed: %1$s</string>
+    <string name="sig_unsigned">Not signed by a distributor: the watch will most likely refuse this package.</string>
+    <string name="sig_forged">The signature imitates a Samsung certificate authority but its certificate chain is not genuine: the watch will refuse the package.</string>
+    <string name="sig_untrusted">Signed with a certificate that Tizen watches do not trust (Samsung VD or the Tizen SDK): the watch will refuse the package.</string>
+    <string name="sig_expired">The developer certificate expired on %1$s: the watch will refuse the package.</string>
+    <string name="sig_device_bound">Developer certificate for specific watches (%1$d listed), valid until %2$s: it installs only on those watches.</string>
+    <string name="sig_device_bound_unknown">Developer certificate for specific watches, valid until %1$s: it installs only on those watches.</string>
     <string name="summary">Installed: %1$d, skipped: %4$d, failed: %2$d, cancelled: %3$d</string>
     <string name="wearable_note">Removing a helper app from the phone may also remove the app from the watch, but Galaxy Wearable does not always do it. Check the app list in Galaxy Wearable.</string>
     <string name="size_kb">%1$d KB</string>

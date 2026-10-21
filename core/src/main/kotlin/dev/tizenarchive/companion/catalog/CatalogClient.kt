@@ -1,5 +1,6 @@
 package dev.tizenarchive.companion.catalog
 
+import dev.tizenarchive.companion.readUpTo
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -92,7 +93,7 @@ public class CatalogClient(
     private inline fun <reified T> getJson(path: String): T {
         open(path, accept = "application/json").use { connection ->
             val bytes = try {
-                connection.inputStream.use { it.readNBytes(MAX_JSON_BYTES + 1) }
+                connection.inputStream.use { it.readUpTo(MAX_JSON_BYTES + 1) }
             } catch (e: IOException) {
                 throw CatalogException(CatalogError.NETWORK, e.message ?: "Network error", e)
             }

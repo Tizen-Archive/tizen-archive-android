@@ -1,5 +1,6 @@
 package dev.tizenarchive.companion.tizen
 
+import dev.tizenarchive.companion.readUpTo
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipException
@@ -40,7 +41,7 @@ public object TizenPackageReader {
             ZipFile(file).use { zip ->
                 val entry = zip.getEntry(path) ?: return null
                 if (entry.size !in 1..MAX_ICON_BYTES) return null
-                zip.getInputStream(entry).use { it.readNBytes(MAX_ICON_BYTES.toInt()) }
+                zip.getInputStream(entry).use { it.readUpTo(MAX_ICON_BYTES.toInt()) }
             }
         } catch (e: IOException) {
             null
@@ -49,7 +50,7 @@ public object TizenPackageReader {
 
     private fun ZipFile.readManifest(entry: java.util.zip.ZipEntry): ByteArray {
         if (entry.size !in 0..MAX_MANIFEST_BYTES) throw InvalidTizenPackageException("Manifest has an unexpected size")
-        val bytes = getInputStream(entry).use { it.readNBytes(MAX_MANIFEST_BYTES.toInt() + 1) }
+        val bytes = getInputStream(entry).use { it.readUpTo(MAX_MANIFEST_BYTES.toInt() + 1) }
         if (bytes.size > MAX_MANIFEST_BYTES) throw InvalidTizenPackageException("Manifest is too large")
         return bytes
     }
