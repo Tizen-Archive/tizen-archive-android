@@ -12,6 +12,15 @@ public enum class CatalogError { NOT_FOUND, NETWORK, BAD_RESPONSE, SIZE_MISMATCH
 
 public class CatalogException(public val error: CatalogError, message: String, cause: Throwable? = null) : Exception(message, cause)
 
+/** What the app needs from the catalog; [CatalogClient] is the real one, tests use fakes. */
+public interface CatalogApi {
+    /** Resolves the latest version when [version] is null. */
+    public fun version(packageId: String, version: String?): VersionInfo
+
+    /** Downloads and verifies the artifact; the partial file is removed on any failure. */
+    public fun download(artifact: Artifact, destination: File, progress: (Long) -> Unit = {})
+}
+
 /**
  * Talks to the catalog. The server address is fixed by the app and never comes from a link; only HTTPS is
  * accepted unless [allowCleartext] is set (tests and local development).
@@ -20,14 +29,13 @@ public class CatalogClient(
     baseUrl: String,
     private val userAgent: String,
     private val allowCleartext: Boolean = false,
-) {
+) : CatalogApi {
     private val base: URI = URI(baseUrl.trimEnd('/')).also {
         require(it.scheme == "https" || (allowCleartext && it.scheme == "http")) { "Catalog URL must use HTTPS" }
     }
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
-    /** Resolves the latest version when [version] is null. */
-    public fun version(packageId: String, version: String?): VersionInfo {
+    override fun version(packageId: String, version: String?): VersionInfo {
         require(InstallLinkParser.isIdentifier(packageId)) { "Invalid package id" }
         val resolved = version ?: getJson<PackageInfo>("/api/packages/$packageId").latestVersion
             ?: throw CatalogException(CatalogError.NOT_FOUND, "The package has no published versions")
@@ -45,8 +53,7 @@ public class CatalogClient(
         return info
     }
 
-    /** Downloads and verifies the artifact; the partial file is removed on any failure. */
-    public fun download(artifact: Artifact, destination: File, progress: (Long) -> Unit = {}) {
+    override fun download(artifact: Artifact, destination: File, progress: (Long) -> Unit) {
         val path = artifact.downloadUrl ?: throw CatalogException(CatalogError.BAD_RESPONSE, "No download URL")
         if (artifact.size > MAX_ARTIFACT_BYTES) throw CatalogException(CatalogError.TOO_LARGE, "The package is too large")
         try {

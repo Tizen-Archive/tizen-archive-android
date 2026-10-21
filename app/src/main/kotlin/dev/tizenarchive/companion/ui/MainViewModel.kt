@@ -1,20 +1,14 @@
 package dev.tizenarchive.companion.ui
 
-import android.app.Application
-import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
-import android.os.SystemClock
-import android.provider.OpenableColumns
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.tizenarchive.companion.BuildConfig
+import dev.tizenarchive.companion.Dependencies
 import dev.tizenarchive.companion.apk.CompanionApk
-import dev.tizenarchive.companion.build.CompanionBuilder
 import dev.tizenarchive.companion.build.DeliveryPacing
 import dev.tizenarchive.companion.catalog.Artifact
 import dev.tizenarchive.companion.catalog.ArtifactSelection
-import dev.tizenarchive.companion.catalog.CatalogClient
 import dev.tizenarchive.companion.catalog.CatalogError
 import dev.tizenarchive.companion.catalog.CatalogException
 import dev.tizenarchive.companion.catalog.InstallLinkParser
@@ -23,22 +17,14 @@ import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.catalog.Selection
 import dev.tizenarchive.companion.catalog.VersionCompare
 import dev.tizenarchive.companion.catalog.VersionInfo
-import dev.tizenarchive.companion.companions.CompanionRepository
 import dev.tizenarchive.companion.companions.InstalledCompanion
-import dev.tizenarchive.companion.files.FolderScanner
-import dev.tizenarchive.companion.files.FolderStore
 import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.files.PackagePreview
-import dev.tizenarchive.companion.files.PreviewLoader
 import dev.tizenarchive.companion.install.InstallOutcome
-import dev.tizenarchive.companion.install.PackageInstallerGateway
 import dev.tizenarchive.companion.install.UninstallOutcome
-import dev.tizenarchive.companion.notify.QueueNotifier
-import dev.tizenarchive.companion.signing.KeystoreSigningKey
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.File
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -153,20 +139,16 @@ internal data class UiState(
     val cancelled: Int get() = states.values.count { it is ItemState.Cancelled }
 }
 
-internal class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val context = application
-    private val folders = FolderStore(application)
-    private val gateway = PackageInstallerGateway(application)
-    private val companionRepository = CompanionRepository(application)
-    private val signingKey = KeystoreSigningKey()
-    private val catalog = CatalogClient(
-        BuildConfig.CATALOG_URL,
-        "tizen-companion-installer/${BuildConfig.VERSION_NAME}",
-        allowCleartext = BuildConfig.DEBUG,
-    )
-    private val workDir = File(application.cacheDir, "work")
-    private val previewLoader = PreviewLoader(application)
-    private val notifier = QueueNotifier(application)
+internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
+    private val platform = deps.platform
+    private val io = deps.io
+    private val folders = deps.folders
+    private val gateway = deps.installer
+    private val companionRepository = deps.companions
+    private val catalog = deps.catalog
+    private val previewLoader = deps.previews
+    private val notifier = deps.notifier
+    private val workDir = File(platform.cacheDir, "work")
     private var previewJob: Job? = null
 
     private val _state = MutableStateFlow(UiState())
@@ -183,9 +165,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     init {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            withContext(io) {
                 workDir.deleteRecursively()
-                File(context.cacheDir, INCOMING_DIR).deleteRecursively()
+                File(platform.cacheDir, INCOMING_DIR).deleteRecursively()
             }
             folders.load()?.let { openFolder(it) }
         }
@@ -197,7 +179,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     fun refreshCompanions() {
         viewModelScope.launch {
-            val list = withContext(Dispatchers.IO) { runCatching { companionRepository.list() }.getOrDefault(emptyList()) }
+            val list = withContext(io) { runCatching { companionRepository.list() }.getOrDefault(emptyList()) }
             _state.update { it.copy(companions = list) }
         }
     }
@@ -225,7 +207,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     /** Sends the package of a listed companion again, taking it out of the companion itself (e.g. after a failed delivery). */
     fun resend(companion: InstalledCompanion) {
         if (_state.value.installing) return
-        if (!context.packageManager.canRequestPackageInstalls()) {
+        if (!platform.canRequestPackageInstalls()) {
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
@@ -256,7 +238,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 val installed = companion.tizenVersion ?: continue
                 checked++
                 try {
-                    val latest = withContext(Dispatchers.IO) { catalog.version(id, null) }
+                    val latest = withContext(io) { catalog.version(id, null) }
                     val selection = ArtifactSelection.select(latest) as? Selection.Found ?: continue
                     if (VersionCompare.isNewer(latest.version, installed)) {
                         found[companion.androidPackage] = UpdateInfo(latest.version, selection.artifact)
@@ -276,7 +258,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun update(companion: InstalledCompanion) {
         val update = _state.value.updates[companion.androidPackage] ?: return
         if (_state.value.installing) return
-        if (!context.packageManager.canRequestPackageInstalls()) {
+        if (!platform.canRequestPackageInstalls()) {
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
@@ -308,9 +290,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     // ---- Folder queue -------------------------------------------------------------------------------------
 
     fun onFolderPicked(uri: Uri) {
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
+        platform.takeReadPermission(uri)
         viewModelScope.launch {
             folders.save(uri)
             openFolder(uri)
@@ -321,18 +301,16 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun clearNotification() = notifier.cancel()
 
     fun refreshInstallPermission() {
-        if (context.packageManager.canRequestPackageInstalls()) _state.update { it.copy(needsInstallPermission = false) }
+        if (platform.canRequestPackageInstalls()) _state.update { it.copy(needsInstallPermission = false) }
         refreshMissing()
     }
 
     /** Checks for Galaxy Wearable, Samsung's Gear Plugin and the permission to install apps. */
     private fun refreshMissing() {
-        val manager = context.packageManager
-        fun installed(name: String) = runCatching { manager.getPackageInfo(name, 0) }.isSuccess
         val missing = buildSet {
-            if (!installed(GALAXY_WEARABLE)) add(Missing.GALAXY_WEARABLE)
-            if (!installed(GEAR_PLUGIN)) add(Missing.GEAR_PLUGIN)
-            if (!manager.canRequestPackageInstalls()) add(Missing.INSTALL_PERMISSION)
+            if (!platform.isInstalled(GALAXY_WEARABLE)) add(Missing.GALAXY_WEARABLE)
+            if (!platform.isInstalled(GEAR_PLUGIN)) add(Missing.GEAR_PLUGIN)
+            if (!platform.canRequestPackageInstalls()) add(Missing.INSTALL_PERMISSION)
         }
         _state.update { it.copy(missing = missing) }
     }
@@ -351,7 +329,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     fun installSelected() {
         if (_state.value.installing) return
-        if (!context.packageManager.canRequestPackageInstalls()) {
+        if (!platform.canRequestPackageInstalls()) {
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
@@ -387,7 +365,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun onIncoming(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
-            val (accepted, rejected) = withContext(Dispatchers.IO) { copyIncoming(uris.take(MAX_INCOMING)) }
+            val (accepted, rejected) = withContext(io) { copyIncoming(uris.take(MAX_INCOMING)) }
             _state.update { state ->
                 val known = state.incoming.map { it.uri }.toSet()
                 val fresh = accepted.filter { it.uri !in known }
@@ -404,14 +382,14 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun dismissIncomingNotice() = _state.update { it.copy(incomingRejected = 0) }
 
     private fun copyIncoming(uris: List<Uri>): Pair<List<PackageFile>, Int> {
-        val dir = File(context.cacheDir, INCOMING_DIR).apply { mkdirs() }
+        val dir = File(platform.cacheDir, INCOMING_DIR).apply { mkdirs() }
         val accepted = mutableListOf<PackageFile>()
         var rejected = 0
         for (uri in uris) {
-            val name = displayName(uri) ?: "package-${System.nanoTime()}"
+            val name = platform.displayName(uri) ?: "package-${System.nanoTime()}"
             val target = File(dir, "${System.nanoTime()}-${name.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)}")
             try {
-                val input = context.contentResolver.openInputStream(uri) ?: error("Cannot open")
+                val input = platform.openInput(uri) ?: error("Cannot open")
                 input.use { src -> target.outputStream().use { src.copyTo(it) } }
                 TizenPackageReader.read(target)
                 accepted += PackageFile(Uri.fromFile(target), name, target.length())
@@ -423,18 +401,11 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         return accepted to rejected
     }
 
-    private fun displayName(uri: Uri): String? {
-        if (uri.scheme == "file") return uri.lastPathSegment
-        return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-            if (it.moveToFirst()) it.getString(0) else null
-        }
-    }
-
     /** Received files that were installed are no longer needed. */
     private fun forgetSentIncoming() {
         val sent = _state.value.incoming.filter { _state.value.states[it.uri] is ItemState.Installed }
         if (sent.isEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) { sent.forEach { it.uri.path?.let { path -> File(path).delete() } } }
+        viewModelScope.launch(io) { sent.forEach { it.uri.path?.let { path -> File(path).delete() } } }
         _state.update { state ->
             val gone = sent.map(PackageFile::uri).toSet()
             state.copy(incoming = state.incoming.filterNot { it.uri in gone }, selected = state.selected - gone)
@@ -457,7 +428,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         _state.update { it.copy(remote = RemoteState.Resolving(parsed.packageId)) }
         job = viewModelScope.launch {
             val next = try {
-                val info = withContext(Dispatchers.IO) { catalog.version(parsed.packageId, parsed.version) }
+                val info = withContext(io) { catalog.version(parsed.packageId, parsed.version) }
                 when (val selection = ArtifactSelection.select(info)) {
                     is Selection.Found -> RemoteState.Confirm(info, selection.artifact)
                     is Selection.NotInstallable -> RemoteState.Problem(RemoteProblem.NotInstallable(selection.reason))
@@ -473,7 +444,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     fun confirmRemote() {
         val confirm = _state.value.remote as? RemoteState.Confirm ?: return
-        if (!context.packageManager.canRequestPackageInstalls()) {
+        if (!platform.canRequestPackageInstalls()) {
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
@@ -486,7 +457,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 final = runCatchingItem(::set) {
                     set(ItemState.Downloading(0))
                     val local = File(workDir, "package.bin")
-                    withContext(Dispatchers.IO) {
+                    withContext(io) {
                         workDir.deleteRecursively()
                         workDir.mkdirs()
                         var lastPercent = -1
@@ -516,8 +487,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     private suspend fun openFolder(uri: Uri) {
         _state.update { it.copy(scanning = true, files = emptyList(), selected = emptySet(), states = emptyMap()) }
-        val name = withContext(Dispatchers.IO) { runCatching { FolderScanner.displayName(context.contentResolver, uri) }.getOrNull() }
-        val files = withContext(Dispatchers.IO) { runCatching { FolderScanner.scan(context.contentResolver, uri) }.getOrDefault(emptyList()) }
+        val name = withContext(io) { deps.folderSource.displayName(uri) }
+        val files = withContext(io) { deps.folderSource.scan(uri) }
         _state.update { it.copy(folderName = name, scanning = false, files = files, previews = emptyMap()) }
         loadPreviews()
     }
@@ -525,7 +496,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     /** Reads names and icons of the listed packages one by one in the background; the list updates as they arrive. */
     private fun loadPreviews() {
         previewJob?.cancel()
-        previewJob = viewModelScope.launch(Dispatchers.IO) {
+        previewJob = viewModelScope.launch(io) {
             val pending = _state.value.allFiles.filter { it.uri !in _state.value.previews }.take(MAX_PREVIEWS)
             val batch = mutableMapOf<Uri, PackagePreview>()
             for ((index, file) in pending.withIndex()) {
@@ -541,7 +512,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private suspend fun processLocal(file: PackageFile) = processItem(file.uri, skipIfSent = true) { target, _ ->
-        val input = context.contentResolver.openInputStream(file.uri) ?: error("Cannot open the file")
+        val input = platform.openInput(file.uri) ?: error("Cannot open the file")
         input.use { src -> target.outputStream().use { src.copyTo(it) } }
     }
 
@@ -551,13 +522,13 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val state = runCatchingItem(::set) {
             set(ItemState.Reading)
             val local = File(workDir, "package.bin")
-            withContext(Dispatchers.IO) {
+            withContext(io) {
                 workDir.deleteRecursively()
                 workDir.mkdirs()
                 prepare(local, ::set)
             }
             if (skipIfSent) {
-                val sentAt = withContext(Dispatchers.IO) { sentAt(local) }
+                val sentAt = withContext(io) { sentAt(local) }
                 if (sentAt != null) return@runCatchingItem ItemState.AlreadySent(sentAt)
             }
             buildAndInstall(local, ::set)
@@ -585,17 +556,17 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         } catch (e: Exception) {
             ItemState.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
-            withContext(NonCancellable + Dispatchers.IO) { workDir.deleteRecursively() }
+            withContext(NonCancellable + io) { workDir.deleteRecursively() }
         }
 
     private suspend fun buildAndInstall(local: File, set: (ItemState) -> Unit): ItemState {
         set(ItemState.Building)
-        val built = withContext(Dispatchers.IO) { CompanionBuilder(signingKey.get()).build(local, File(workDir, "out")) }
+        val built = withContext(io) { deps.factory.build(local, File(workDir, "out")) }
         waitForPlugin(set)
         set(ItemState.AwaitingConfirm)
         return when (val outcome = gateway.install(built.apk)) {
             is InstallOutcome.Installed -> {
-                lastInstallMark = SystemClock.elapsedRealtime()
+                lastInstallMark = platform.elapsedRealtime()
                 lastPace = DeliveryPacing.delayAfter(local.length()).toMillis()
                 ItemState.Installed
             }
@@ -613,7 +584,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private suspend fun waitForPlugin(set: (ItemState) -> Unit) {
         val mark = lastInstallMark ?: return
         while (true) {
-            val left = lastPace - (SystemClock.elapsedRealtime() - mark)
+            val left = lastPace - (platform.elapsedRealtime() - mark)
             if (left <= 0) return
             set(ItemState.Waiting(((left + 999) / 1000).toInt()))
             delay(minOf(left, 1000))

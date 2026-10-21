@@ -17,9 +17,13 @@ internal data class PackagePreview(
     val icon: ImageBitmap?,
 )
 
+internal interface PackagePreviews {
+    fun load(uri: Uri, size: Long): PackagePreview?
+}
+
 /** Reads the manifest and the icon of a package straight from its file, without installing anything. */
-internal class PreviewLoader(private val context: Context) {
-    fun load(uri: Uri, size: Long): PackagePreview? {
+internal class PreviewLoader(private val context: Context) : PackagePreviews {
+    override fun load(uri: Uri, size: Long): PackagePreview? {
         // Most providers hand out a seekable descriptor, so the ZIP can be read in place, even when it is large
         runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
