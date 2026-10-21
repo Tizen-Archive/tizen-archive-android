@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import dev.tizenarchive.companion.signature.SignatureAssessment
+import dev.tizenarchive.companion.signature.SignatureInspector
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.File
 
@@ -15,6 +17,8 @@ internal data class PackagePreview(
     val version: String?,
     val kind: String,
     val icon: ImageBitmap?,
+    /** Whether the watch is expected to accept the package's signature; null when it could not be read. */
+    val signature: SignatureAssessment? = null,
 )
 
 internal interface PackagePreviews {
@@ -44,7 +48,7 @@ internal class PreviewLoader(private val context: Context) : PackagePreviews {
     private fun read(file: File): PackagePreview {
         val info = TizenPackageReader.read(file)
         val icon = TizenPackageReader.readIcon(file, info)?.let(::decode)
-        return PackagePreview(info.displayName, info.packageId, info.version, info.kind.extension, icon)
+        return PackagePreview(info.displayName, info.packageId, info.version, info.kind.extension, icon, SignatureInspector.inspect(file))
     }
 
     private fun decode(bytes: ByteArray): ImageBitmap? {

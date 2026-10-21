@@ -66,6 +66,10 @@ import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.files.PackagePreview
+import dev.tizenarchive.companion.signature.SignatureAssessment
+import dev.tizenarchive.companion.signature.SignatureVerdict
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -523,10 +527,32 @@ private fun FileRow(file: PackageFile, preview: PackagePreview?, checked: Boolea
                 style = MaterialTheme.typography.bodySmall,
                 color = if (itemState is ItemState.Failed || itemState is ItemState.SignatureConflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            val warning = preview?.signature?.takeIf { it.worthWarning && itemState == null }
+            if (warning != null) {
+                Text(describe(warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
             if (preview?.name != null && itemState == null) {
                 Text(file.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
         }
+    }
+}
+
+@Composable
+private fun describe(assessment: SignatureAssessment): String {
+    val date = assessment.notAfter?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)).orEmpty()
+    return when (assessment.verdict) {
+        SignatureVerdict.UNSIGNED -> stringResource(R.string.sig_unsigned)
+        SignatureVerdict.FORGED -> stringResource(R.string.sig_forged)
+        SignatureVerdict.UNTRUSTED_BY_WATCH -> stringResource(R.string.sig_untrusted)
+        SignatureVerdict.EXPIRED -> stringResource(R.string.sig_expired, date)
+        SignatureVerdict.DEVICE_BOUND ->
+            if (assessment.deviceCount > 0) {
+                stringResource(R.string.sig_device_bound, assessment.deviceCount, date)
+            } else {
+                stringResource(R.string.sig_device_bound_unknown, date)
+            }
+        SignatureVerdict.STORE_SIGNED, SignatureVerdict.NOT_VERIFIED -> ""
     }
 }
 

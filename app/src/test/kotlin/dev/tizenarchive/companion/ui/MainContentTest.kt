@@ -1,9 +1,11 @@
 package dev.tizenarchive.companion.ui
 
 import android.net.Uri
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -14,6 +16,9 @@ import dev.tizenarchive.companion.catalog.Artifact
 import dev.tizenarchive.companion.catalog.VersionInfo
 import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
+import dev.tizenarchive.companion.files.PackagePreview
+import dev.tizenarchive.companion.signature.SignatureAssessment
+import dev.tizenarchive.companion.signature.SignatureVerdict
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -99,6 +104,19 @@ class MainContentTest {
         val a = file("a.tpk")
         show(UiState(files = listOf(a), installing = true, states = mapOf(a.uri to ItemState.Waiting(12))))
         compose.onNodeWithText(str(R.string.state_waiting, 12)).assertExists()
+    }
+
+    @Test
+    fun `a package the watch will refuse carries a warning, a fine one does not`() {
+        val bad = file("bad.tpk")
+        val ok = file("ok.tpk")
+        val previews = mapOf(
+            bad.uri to PackagePreview("Bad", "com.bad", "1", "tpk", null, SignatureAssessment(SignatureVerdict.UNSIGNED)),
+            ok.uri to PackagePreview("Good", "com.ok", "1", "tpk", null, SignatureAssessment(SignatureVerdict.STORE_SIGNED)),
+        )
+        show(UiState(files = listOf(bad, ok), previews = previews))
+        compose.onNodeWithText(str(R.string.sig_unsigned)).assertExists()
+        compose.onAllNodesWithText(str(R.string.sig_unsigned)).assertCountEquals(1)
     }
 
     @Test
