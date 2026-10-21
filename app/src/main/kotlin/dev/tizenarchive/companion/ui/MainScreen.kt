@@ -76,8 +76,6 @@ internal fun MainScreen(viewModel: MainViewModel) {
     }
     val context = LocalContext.current
 
-    var tab by rememberSaveable { mutableIntStateOf(TAB_INSTALL) }
-
     // A long queue must not be cut off by the screen turning off
     val view = LocalView.current
     DisposableEffect(state.installing) {
@@ -99,6 +97,14 @@ internal fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    MainContent(state, viewModel, onPickFolder = { picker.launch(null) }, onInstall = startInstall)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () -> Unit, onInstall: () -> Unit) {
+    val context = LocalContext.current
+    var tab by rememberSaveable { mutableIntStateOf(TAB_INSTALL) }
     Scaffold(
         topBar = {
             Column {
@@ -117,8 +123,8 @@ internal fun MainScreen(viewModel: MainViewModel) {
             if (tab == TAB_INSTALL) {
                 BottomActions(
                     state = state,
-                    onInstall = startInstall,
-                    onCancel = viewModel::cancel,
+                    onInstall = onInstall,
+                    onCancel = actions::cancel,
                 )
             }
         },
@@ -131,11 +137,11 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 installing = state.installing,
                 updates = state.updates,
                 updateCheck = state.updateCheck,
-                onCheckUpdates = viewModel::checkUpdates,
-                onUpdate = viewModel::update,
-                onResend = viewModel::resend,
-                onCancel = viewModel::cancel,
-                onRemove = viewModel::askRemoval,
+                onCheckUpdates = actions::checkUpdates,
+                onUpdate = actions::update,
+                onResend = actions::resend,
+                onCancel = actions::cancel,
+                onRemove = actions::askRemoval,
             )
             return@Scaffold
         }
@@ -150,14 +156,14 @@ internal fun MainScreen(viewModel: MainViewModel) {
             if (state.missing.isNotEmpty()) {
                 item { MissingCard(state.missing) }
             }
-            item { FolderCard(state, onPick = { picker.launch(null) }) }
+            item { FolderCard(state, onPick = { onPickFolder() }) }
             if (state.incomingRejected > 0) {
                 item {
                     Text(
                         pluralStringResource(R.plurals.incoming_rejected, state.incomingRejected, state.incomingRejected),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.clickable(onClick = viewModel::dismissIncomingNotice),
+                        modifier = Modifier.clickable(onClick = actions::dismissIncomingNotice),
                     )
                 }
             }
@@ -165,7 +171,7 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 item {
                     OutlinedTextField(
                         value = state.query,
-                        onValueChange = viewModel::setQuery,
+                        onValueChange = actions::setQuery,
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         label = { Text(stringResource(R.string.search)) },
@@ -173,10 +179,10 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = viewModel::selectAllVisible, enabled = !state.installing) {
+                        OutlinedButton(onClick = actions::selectAllVisible, enabled = !state.installing) {
                             Text(stringResource(R.string.select_all))
                         }
-                        OutlinedButton(onClick = viewModel::clearSelection, enabled = !state.installing) {
+                        OutlinedButton(onClick = actions::clearSelection, enabled = !state.installing) {
                             Text(stringResource(R.string.clear_selection))
                         }
                     }
@@ -190,7 +196,7 @@ internal fun MainScreen(viewModel: MainViewModel) {
                         checked = file.uri in state.selected,
                         enabled = !state.installing,
                         itemState = state.states[file.uri],
-                        onToggle = { viewModel.toggle(file.uri) },
+                        onToggle = { actions.toggle(file.uri) },
                     )
                     HorizontalDivider()
                 }
@@ -211,24 +217,24 @@ internal fun MainScreen(viewModel: MainViewModel) {
         val wearable = remember { context.packageManager.getLaunchIntentForPackage(GALAXY_WEARABLE) }
         RemovalDialog(
             removal,
-            onConfirm = viewModel::confirmRemoval,
-            onDismiss = viewModel::dismissRemoval,
+            onConfirm = actions::confirmRemoval,
+            onDismiss = actions::dismissRemoval,
             onOpenWearable = wearable?.let { intent ->
                 {
                     context.startActivity(intent)
-                    viewModel.dismissRemoval()
+                    actions.dismissRemoval()
                 }
             },
         )
     }
 
     state.remote?.let { remote ->
-        RemoteDialog(remote, onConfirm = viewModel::confirmRemote, onDismiss = viewModel::dismissRemote)
+        RemoteDialog(remote, onConfirm = actions::confirmRemote, onDismiss = actions::dismissRemote)
     }
 
     if (state.needsInstallPermission) {
         AlertDialog(
-            onDismissRequest = viewModel::dismissPermissionDialog,
+            onDismissRequest = actions::dismissPermissionDialog,
             title = { Text(stringResource(R.string.allow_unknown_title)) },
             text = { Text(stringResource(R.string.allow_unknown_message)) },
             confirmButton = {
@@ -239,7 +245,7 @@ internal fun MainScreen(viewModel: MainViewModel) {
                 }) { Text(stringResource(R.string.open_settings)) }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissPermissionDialog) { Text(stringResource(R.string.cancel)) }
+                TextButton(onClick = actions::dismissPermissionDialog) { Text(stringResource(R.string.cancel)) }
             },
         )
     }

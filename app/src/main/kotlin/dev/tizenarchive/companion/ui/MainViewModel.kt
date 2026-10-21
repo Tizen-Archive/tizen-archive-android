@@ -35,6 +35,25 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** What the screen can ask for; [MainViewModel] implements it and UI tests record the calls. */
+internal interface MainActions {
+    fun cancel()
+    fun checkUpdates()
+    fun update(companion: InstalledCompanion)
+    fun resend(companion: InstalledCompanion)
+    fun askRemoval(companion: InstalledCompanion)
+    fun dismissIncomingNotice()
+    fun setQuery(query: String)
+    fun selectAllVisible()
+    fun clearSelection()
+    fun toggle(uri: Uri)
+    fun confirmRemoval()
+    fun dismissRemoval()
+    fun confirmRemote()
+    fun dismissRemote()
+    fun dismissPermissionDialog()
+}
+
 /** The key under which the state of sending a companion again is kept (the list items use their file URI). */
 internal fun companionKey(androidPackage: String): Uri = Uri.parse("companion:$androidPackage")
 
@@ -139,7 +158,7 @@ internal data class UiState(
     val cancelled: Int get() = states.values.count { it is ItemState.Cancelled }
 }
 
-internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
+internal class MainViewModel(private val deps: Dependencies) : ViewModel(), MainActions {
     private val platform = deps.platform
     private val io = deps.io
     private val folders = deps.folders
@@ -184,13 +203,13 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
         }
     }
 
-    fun askRemoval(companion: InstalledCompanion) = _state.update { it.copy(removal = RemovalState.Confirm(companion)) }
+    override fun askRemoval(companion: InstalledCompanion) = _state.update { it.copy(removal = RemovalState.Confirm(companion)) }
 
-    fun dismissRemoval() {
+    override fun dismissRemoval() {
         if (_state.value.removal !is RemovalState.Working) _state.update { it.copy(removal = null) }
     }
 
-    fun confirmRemoval() {
+    override fun confirmRemoval() {
         val companion = (_state.value.removal as? RemovalState.Confirm)?.companion ?: return
         _state.update { it.copy(removal = RemovalState.Working(companion)) }
         viewModelScope.launch {
@@ -205,7 +224,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
     }
 
     /** Sends the package of a listed companion again, taking it out of the companion itself (e.g. after a failed delivery). */
-    fun resend(companion: InstalledCompanion) {
+    override fun resend(companion: InstalledCompanion) {
         if (_state.value.installing) return
         if (!platform.canRequestPackageInstalls()) {
             _state.update { it.copy(needsInstallPermission = true) }
@@ -226,7 +245,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
     // ---- Updates from the catalog ---------------------------------------------------------------------------
 
     /** Asks the catalog for the latest version of every sent package; runs only when the user taps the button. */
-    fun checkUpdates() {
+    override fun checkUpdates() {
         if (_state.value.updateCheck == UpdateCheck.Checking || _state.value.installing) return
         _state.update { it.copy(updateCheck = UpdateCheck.Checking, updates = emptyMap()) }
         viewModelScope.launch {
@@ -255,7 +274,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
     }
 
     /** Downloads the newer version and sends it to the watch as an update of the companion. */
-    fun update(companion: InstalledCompanion) {
+    override fun update(companion: InstalledCompanion) {
         val update = _state.value.updates[companion.androidPackage] ?: return
         if (_state.value.installing) return
         if (!platform.canRequestPackageInstalls()) {
@@ -315,17 +334,17 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
         _state.update { it.copy(missing = missing) }
     }
 
-    fun setQuery(query: String) = _state.update { it.copy(query = query) }
+    override fun setQuery(query: String) = _state.update { it.copy(query = query) }
 
-    fun toggle(uri: Uri) = _state.update {
+    override fun toggle(uri: Uri) = _state.update {
         it.copy(selected = if (uri in it.selected) it.selected - uri else it.selected + uri)
     }
 
-    fun selectAllVisible() = _state.update { it.copy(selected = it.selected + it.visibleFiles.map(PackageFile::uri)) }
+    override fun selectAllVisible() = _state.update { it.copy(selected = it.selected + it.visibleFiles.map(PackageFile::uri)) }
 
-    fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
+    override fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
 
-    fun dismissPermissionDialog() = _state.update { it.copy(needsInstallPermission = false) }
+    override fun dismissPermissionDialog() = _state.update { it.copy(needsInstallPermission = false) }
 
     fun installSelected() {
         if (_state.value.installing) return
@@ -356,7 +375,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
         }
     }
 
-    fun cancel() {
+    override fun cancel() {
         job?.cancel()
     }
 
@@ -379,7 +398,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
         }
     }
 
-    fun dismissIncomingNotice() = _state.update { it.copy(incomingRejected = 0) }
+    override fun dismissIncomingNotice() = _state.update { it.copy(incomingRejected = 0) }
 
     private fun copyIncoming(uris: List<Uri>): Pair<List<PackageFile>, Int> {
         val dir = File(platform.cacheDir, INCOMING_DIR).apply { mkdirs() }
@@ -442,7 +461,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
         }
     }
 
-    fun confirmRemote() {
+    override fun confirmRemote() {
         val confirm = _state.value.remote as? RemoteState.Confirm ?: return
         if (!platform.canRequestPackageInstalls()) {
             _state.update { it.copy(needsInstallPermission = true) }
@@ -478,7 +497,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel() {
         }
     }
 
-    fun dismissRemote() {
+    override fun dismissRemote() {
         if (_state.value.installing) job?.cancel()
         _state.update { it.copy(remote = null) }
     }

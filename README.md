@@ -88,6 +88,19 @@ To write a signed sample companion for manual installation:
 S4_OUT_DIR=/tmp/out S4_PACKAGE=/path/app.wgt ./gradlew :core:test --tests '*DeviceSamplesTest*'
 ```
 
+## Testing
+
+`make check` runs everything on the JVM, with no phone or emulator:
+
+- `core`: JUnit 5 unit tests (binary manifest writer, APK layout and signing, package reader, catalog client,
+  link parser, pacing) plus fuzz-style robustness tests.
+- `app`: Robolectric tests. `MainViewModelTest` drives the real `MainViewModel` on fakes (`Dependencies`: installer,
+  catalog, folder, clock), including the pacing between operations; `MainContentTest` renders the screen with
+  Compose test APIs against a recording `MainActions`, in English and Russian.
+
+Debug builds use the application id suffix `.debug`, so they can be installed next to a release build without touching
+it. Instrumented tests (`app/src/androidTest`, Keystore and scale) need a device: `./gradlew :app:connectedDebugAndroidTest`.
+
 Releases: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
