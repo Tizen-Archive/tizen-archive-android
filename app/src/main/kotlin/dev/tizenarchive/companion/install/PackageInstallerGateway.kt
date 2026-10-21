@@ -34,11 +34,18 @@ internal sealed interface UninstallOutcome {
 /** The raw result PackageInstaller reports for a session or an uninstall. */
 private class StatusEvent(val status: Int, val message: String?, val packageName: String?)
 
+/** What the view model needs to install and remove helper apps; [PackageInstallerGateway] is the real one. */
+internal interface Installer {
+    suspend fun install(apk: File): InstallOutcome
+
+    suspend fun uninstall(packageName: String): UninstallOutcome
+}
+
 /** Installs and removes helper apps through PackageInstaller; the system asks the user to confirm. */
-internal class PackageInstallerGateway(private val context: Context) {
+internal class PackageInstallerGateway(private val context: Context) : Installer {
     private val counter = AtomicInteger()
 
-    suspend fun install(apk: File): InstallOutcome {
+    override suspend fun install(apk: File): InstallOutcome {
         val installer = context.packageManager.packageInstaller
         val sessionId = installer.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
         val event = awaitStatus(onCancel = { runCatching { installer.abandonSession(sessionId) } }) { sender, fail ->
@@ -64,7 +71,7 @@ internal class PackageInstallerGateway(private val context: Context) {
         }
     }
 
-    suspend fun uninstall(packageName: String): UninstallOutcome {
+    override suspend fun uninstall(packageName: String): UninstallOutcome {
         val installer = context.packageManager.packageInstaller
         val event = awaitStatus(onCancel = {}) { sender, fail ->
             try {

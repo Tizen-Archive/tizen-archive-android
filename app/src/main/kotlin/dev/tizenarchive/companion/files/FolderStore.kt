@@ -9,11 +9,17 @@ import kotlinx.coroutines.flow.first
 
 private val Context.settings by preferencesDataStore(name = "settings")
 
-/** Remembers the chosen folder (a persisted SAF tree URI). */
-internal class FolderStore(private val context: Context) {
-    suspend fun load(): Uri? = context.settings.data.first()[FOLDER]?.let(Uri::parse)
+internal interface FolderMemory {
+    suspend fun load(): Uri?
 
-    suspend fun save(uri: Uri) {
+    suspend fun save(uri: Uri)
+}
+
+/** Remembers the chosen folder (a persisted SAF tree URI). */
+internal class FolderStore(private val context: Context) : FolderMemory {
+    override suspend fun load(): Uri? = context.settings.data.first()[FOLDER]?.let(Uri::parse)
+
+    override suspend fun save(uri: Uri) {
         context.settings.edit { it[FOLDER] = uri.toString() }
     }
 

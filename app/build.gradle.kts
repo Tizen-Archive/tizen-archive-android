@@ -37,6 +37,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installs next to a release build, so tests on a phone never replace the app that is really used
+            applicationIdSuffix = ".debug"
+        }
         release {
             if (releaseStoreFile != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
@@ -52,6 +56,13 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged resources and the manifest of the app
+            isIncludeAndroidResources = true
+        }
     }
 
     dependenciesInfo {
@@ -81,6 +92,15 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.compose.ui.tooling)
+
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.bouncycastle.pkix)
+    debugImplementation(libs.compose.ui.test.manifest)
 
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)

@@ -14,9 +14,14 @@ public class BuiltCompanion(
     public val info: TizenPackageInfo,
 )
 
+/** Turns a local Tizen package file into a signed companion APK; the app uses [CompanionBuilder], tests use fakes. */
+public fun interface CompanionFactory {
+    public fun build(source: File, outputDir: File): BuiltCompanion
+}
+
 /** Turns a local Tizen package file into a signed companion APK. */
-public class CompanionBuilder(private val key: SigningKey, private val clock: () -> Instant = Instant::now) {
-    public fun build(source: File, outputDir: File): BuiltCompanion {
+public class CompanionBuilder(private val key: SigningKey, private val clock: () -> Instant = Instant::now) : CompanionFactory {
+    override fun build(source: File, outputDir: File): BuiltCompanion {
         val info = TizenPackageReader.read(source)
         val name = CompanionNaming.androidPackageName(info.packageId)
         val manifest = CompanionManifest(

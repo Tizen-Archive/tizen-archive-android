@@ -7,6 +7,13 @@ import java.util.Locale
 
 internal data class PackageFile(val uri: Uri, val name: String, val size: Long)
 
+/** Lists packages in a chosen folder; [ContentFolderSource] reads the real one. */
+internal interface FolderSource {
+    fun displayName(tree: Uri): String?
+
+    fun scan(tree: Uri): List<PackageFile>
+}
+
 /** Walks a Storage Access Framework tree and lists `.wgt` and `.tpk` files. */
 internal object FolderScanner {
     private const val MAX_DEPTH = 12

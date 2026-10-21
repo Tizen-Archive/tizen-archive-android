@@ -26,8 +26,12 @@ internal data class InstalledCompanion(
  * has to be stored by the app: the list survives app updates and cleared app data. Android hides other apps from
  * us unless they match the `<queries>` entry of this app, which the marker component of a companion does.
  */
-internal class CompanionRepository(private val context: Context) {
-    fun list(): List<InstalledCompanion> {
+internal interface Companions {
+    fun list(): List<InstalledCompanion>
+}
+
+internal class CompanionRepository(private val context: Context) : Companions {
+    override fun list(): List<InstalledCompanion> {
         val manager = context.packageManager
         val flags = PackageManager.GET_META_DATA
         val packages: List<PackageInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

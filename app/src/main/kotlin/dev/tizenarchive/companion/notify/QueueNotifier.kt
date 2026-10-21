@@ -13,9 +13,15 @@ import androidx.core.content.ContextCompat
 import dev.tizenarchive.companion.MainActivity
 import dev.tizenarchive.companion.R
 
+internal interface QueueNotifications {
+    fun notifyDone(sent: Int, skipped: Int, failed: Int, cancelled: Int)
+
+    fun cancel()
+}
+
 /** Tells the user that a long queue is finished, e.g. when the screen was locked or another app is in front. */
-internal class QueueNotifier(private val context: Context) {
-    fun notifyDone(sent: Int, skipped: Int, failed: Int, cancelled: Int) {
+internal class QueueNotifier(private val context: Context) : QueueNotifications {
+    override fun notifyDone(sent: Int, skipped: Int, failed: Int, cancelled: Int) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
@@ -38,7 +44,7 @@ internal class QueueNotifier(private val context: Context) {
         manager.notify(ID, notification)
     }
 
-    fun cancel() = NotificationManagerCompat.from(context).cancel(ID)
+    override fun cancel() = NotificationManagerCompat.from(context).cancel(ID)
 
     private companion object {
         const val CHANNEL = "queue"
