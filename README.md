@@ -1,5 +1,7 @@
 # Tizen Companion Installer
 
+[![check](https://github.com/Tizen-Archive/tizen-companion-installer/actions/workflows/check.yml/badge.svg)](https://github.com/Tizen-Archive/tizen-companion-installer/actions/workflows/check.yml)
+
 Android app that installs Tizen watch packages (`.wgt`, `.tpk`) on a Samsung Galaxy Watch or Gear watch through
 Galaxy Wearable, without a computer and without developer mode on the watch.
 
@@ -97,6 +99,9 @@ S4_OUT_DIR=/tmp/out S4_PACKAGE=/path/app.wgt ./gradlew :core:test --tests '*Devi
 - `app`: Robolectric tests. `MainViewModelTest` drives the real `MainViewModel` on fakes (`Dependencies`: installer,
   catalog, folder, clock), including the pacing between operations; `MainContentTest` renders the screen with
   Compose test APIs against a recording `MainActions`, in English and Russian.
+
+GitHub Actions (`.github/workflows/check.yml`) runs `./gradlew check` with an empty Gradle cache on every push and pull
+request, and `make reproducible` on `v*` tags.
 
 Debug builds use the application id suffix `.debug`, so they can be installed next to a release build without touching
 it. Instrumented tests (`app/src/androidTest`, Keystore and scale) need a device: `./gradlew :app:connectedDebugAndroidTest`.
