@@ -51,6 +51,12 @@
     <string name="missing_plugin">Samsung\'s Gear Plugin is not installed. Galaxy Wearable adds it when you connect a Galaxy Watch or Gear watch: connect your watch there first.</string>
     <string name="missing_permission">Android must allow this app to install the small helper app that carries each package to the watch.</string>
     <string name="notification_channel">Queue finished</string>
+    <string name="channel_progress">Sending progress</string>
+    <string name="channel_confirm">Confirmation needed</string>
+    <string name="notification_progress">Sending to the watch</string>
+    <string name="notification_progress_many">Sending to the watch: %1$d of %2$d</string>
+    <string name="notification_confirm_title">Confirm the installation</string>
+    <string name="notification_confirm_text">Tap to confirm the helper app that carries the package to the watch.</string>
     <string name="notification_done">Sending to the watch finished</string>
     <string name="state_queued">Waiting</string>
     <string name="state_reading">Reading package</string>

@@ -22,6 +22,7 @@ import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.files.PackagePreview
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.UninstallOutcome
+import dev.tizenarchive.companion.notify.ProgressInfo
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -174,6 +175,19 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     val state: StateFlow<UiState> = _state
 
     private var job: Job? = null
+    private val progress = deps.progress
+
+    /** Which item of the running operation is being handled, for the notification. */
+    private var position = Triple(1, 1, null as String?)
+
+    private fun report(state: ItemState) {
+        if (state is ItemState.Installed || state is ItemState.AlreadySent || state is ItemState.Cancelled ||
+            state is ItemState.Failed || state is ItemState.SignatureConflict
+        ) {
+            return
+        }
+        progress.update(ProgressInfo(position.first, position.second, position.third, state))
+    }
 
     /**
      * Elapsed-time mark of the last companion installed on the phone and how long the plugin needs for it. It outlives a
@@ -183,6 +197,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     private var lastPace: Long = 0
 
     init {
+        progress.onCancel = ::cancel
         viewModelScope.launch {
             withContext(io) {
                 workDir.deleteRecursively()
@@ -231,12 +246,14 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             return
         }
         val key = companionKey(companion.androidPackage)
+        position = Triple(1, 1, companion.label)
         _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
         job = viewModelScope.launch {
             try {
                 processItem(key) { target, _ -> CompanionApk.extractPackage(File(companion.sourceDir), target) }
             } finally {
                 _state.update { it.copy(installing = false) }
+                progress.stop()
                 refreshCompanions()
             }
         }
@@ -282,6 +299,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             return
         }
         val key = companionKey(companion.androidPackage)
+        position = Triple(1, 1, companion.label)
         _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
         job = viewModelScope.launch {
             try {
@@ -301,6 +319,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                 }
             } finally {
                 _state.update { it.copy(installing = false) }
+                progress.stop()
                 refreshCompanions()
             }
         }
@@ -357,9 +376,13 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         _state.update { it.copy(installing = true, states = queue.associate { f -> f.uri to ItemState.Queued }) }
         job = viewModelScope.launch {
             try {
-                for (file in queue) processLocal(file)
+                for ((index, file) in queue.withIndex()) {
+                    position = Triple(index + 1, queue.size, _state.value.previews[file.uri]?.name ?: file.name)
+                    processLocal(file)
+                }
             } finally {
                 _state.update { it.copy(installing = false) }
+                progress.stop()
                 refreshCompanions()
                 forgetSentIncoming()
                 if (queue.size > 1) {
@@ -373,6 +396,11 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        progress.onCancel = null
+        progress.stop()
     }
 
     override fun cancel() {
@@ -468,7 +496,11 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             return
         }
         val title = confirm.info.name ?: confirm.info.packageId
-        fun set(item: ItemState) = _state.update { it.copy(remote = RemoteState.Working(title, item)) }
+        position = Triple(1, 1, title)
+        fun set(item: ItemState) {
+            _state.update { it.copy(remote = RemoteState.Working(title, item)) }
+            report(item)
+        }
         _state.update { it.copy(installing = true) }
         job = viewModelScope.launch {
             var final: ItemState = ItemState.Cancelled
@@ -492,6 +524,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                 }
             } finally {
                 _state.update { it.copy(installing = false, remote = RemoteState.Finished(title, final)) }
+                progress.stop()
                 refreshCompanions()
             }
         }
@@ -537,7 +570,10 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     /** Takes the package ([prepare] writes it to the file), builds a companion, installs it and records the state under [key]. */
     private suspend fun processItem(key: Uri, skipIfSent: Boolean = false, prepare: suspend (File, (ItemState) -> Unit) -> Unit) {
-        fun set(state: ItemState) = _state.update { it.copy(states = it.states + (key to state)) }
+        fun set(state: ItemState) {
+            _state.update { it.copy(states = it.states + (key to state)) }
+            report(state)
+        }
         val state = runCatchingItem(::set) {
             set(ItemState.Reading)
             val local = File(workDir, "package.bin")

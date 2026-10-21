@@ -24,7 +24,9 @@ sends the package to the watch over Bluetooth.
   survives app updates), sends a package again, checks the catalog for newer versions and updates them, and removes helper
   apps.
 - A card tells what is missing (Galaxy Wearable, Gear Plugin, the install permission); the screen stays on while a queue
-  runs and a notification reports its end.
+  runs and a notification reports its end. While a queue runs a foreground service keeps the app alive when you switch
+  away, with a progress notification (and Cancel); when the app is in the background, Android's install confirmation
+  arrives as a notification you tap, because Android does not let a background app open windows.
 - No ads, analytics or trackers. The network is used only for the catalog link above and for the update check you start.
 - English and Russian interface.
 

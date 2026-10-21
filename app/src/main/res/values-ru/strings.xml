@@ -57,6 +57,12 @@
     <string name="missing_plugin">Не установлен Gear Plugin от Samsung. Galaxy Wearable добавляет его при подключении часов Galaxy Watch или Gear: сначала подключите часы там.</string>
     <string name="missing_permission">Android должен разрешить этому приложению ставить маленькое вспомогательное приложение, которое доставляет каждый пакет на часы.</string>
     <string name="notification_channel">Очередь завершена</string>
+    <string name="channel_progress">Ход отправки</string>
+    <string name="channel_confirm">Нужно подтверждение</string>
+    <string name="notification_progress">Отправка на часы</string>
+    <string name="notification_progress_many">Отправка на часы: %1$d из %2$d</string>
+    <string name="notification_confirm_title">Подтвердите установку</string>
+    <string name="notification_confirm_text">Нажмите, чтобы подтвердить установку вспомогательного приложения, которое доставляет пакет на часы.</string>
     <string name="notification_done">Отправка на часы завершена</string>
     <string name="state_queued">Ожидание</string>
     <string name="state_reading">Чтение пакета</string>
