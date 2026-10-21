@@ -25,7 +25,7 @@ jobs:
       - name: Android SDK packages
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;37.0.0" > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
           echo "sdk.dir=$ANDROID_HOME" > local.properties
       # Empty Gradle cache on purpose: dependency verification must pass the way F-Droid will build it
       - name: Check (unit tests, lint, aapt2 cross-check)
@@ -60,6 +60,6 @@ jobs:
       - name: Android SDK packages
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;37.0.0" > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
       - name: Two clean builds must be identical
         run: JAVA_HOME="$JAVA_HOME" scripts/check-reproducible.sh
