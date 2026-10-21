@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Every companion declares this action in a marker component, so Android lets the app see the companions -->
     <queries>
@@ -71,5 +73,11 @@
                 <data android:scheme="tizen-archive" android:host="install" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps the process alive while a queue runs; does no work of its own -->
+        <service
+            android:name=".notify.QueueService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

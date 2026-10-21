@@ -24,6 +24,8 @@ import dev.tizenarchive.companion.install.Installer
 import dev.tizenarchive.companion.install.PackageInstallerGateway
 import dev.tizenarchive.companion.notify.QueueNotifications
 import dev.tizenarchive.companion.notify.QueueNotifier
+import dev.tizenarchive.companion.notify.QueueProgress
+import dev.tizenarchive.companion.notify.QueueProgressNotifier
 import dev.tizenarchive.companion.signing.KeystoreSigningKey
 import java.io.File
 import java.io.InputStream
@@ -88,6 +90,7 @@ internal class Dependencies(
     val factory: CompanionFactory,
     val previews: PackagePreviews,
     val notifier: QueueNotifications,
+    val progress: QueueProgress,
     val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     companion object {
@@ -108,6 +111,7 @@ internal class Dependencies(
                 factory = CompanionFactory { source, outputDir -> CompanionBuilder(keys.get()).build(source, outputDir) },
                 previews = PreviewLoader(application),
                 notifier = QueueNotifier(application),
+                progress = QueueProgressNotifier(application),
             )
         }
     }

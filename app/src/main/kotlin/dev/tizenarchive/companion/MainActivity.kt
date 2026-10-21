@@ -35,6 +35,16 @@ internal class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.inFront = true
+    }
+
+    override fun onStop() {
+        AppVisibility.inFront = false
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleLink(intent)

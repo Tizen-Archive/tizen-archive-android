@@ -52,6 +52,7 @@ class MainViewModelTest {
     private lateinit var companions: FakeCompanions
     private lateinit var source: FakeFolderSource
     private lateinit var notifier: FakeNotifier
+    private lateinit var progress: dev.tizenarchive.companion.FakeProgress
     private lateinit var catalog: FakeCatalog
 
     @Before
@@ -63,6 +64,7 @@ class MainViewModelTest {
         companions = FakeCompanions()
         source = FakeFolderSource()
         notifier = FakeNotifier()
+        progress = dev.tizenarchive.companion.FakeProgress()
         catalog = FakeCatalog()
     }
 
@@ -82,6 +84,7 @@ class MainViewModelTest {
             factory = FakeFactory(),
             previews = FakePreviews(),
             notifier = notifier,
+            progress = progress,
             io = dispatcher,
         ),
     )
@@ -241,6 +244,54 @@ class MainViewModelTest {
         dispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(listOf(FakeNotifier.Done(sent = 2, skipped = 0, failed = 0, cancelled = 0)), notifier.done)
+    }
+
+    @Test
+    fun `the foreground service follows the queue and stops at its end`() {
+        addFile("a.tpk", "com.a", "1.0")
+        addFile("b.tpk", "com.b", "1.0")
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.selectAll()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val updates = progress.updates
+        assertEquals(setOf(1, 2), updates.map { it.index }.toSet())
+        assertTrue(updates.all { it.total == 2 })
+        assertTrue(updates.any { it.index == 2 && it.state is ItemState.Waiting })
+        assertTrue(updates.any { it.state == ItemState.AwaitingConfirm })
+        assertTrue(updates.none { it.state is ItemState.Installed })
+        assertEquals(1, progress.stops)
+    }
+
+    @Test
+    fun `cancelling from the notification cancels the queue`() {
+        addFile("a.tpk", "com.a", "1.0")
+        installer.gate = kotlinx.coroutines.CompletableDeferred()
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.selectAll()
+        dispatcher.scheduler.runCurrent()
+        progress.onCancel!!.invoke()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(!vm.state.value.installing)
+        assertEquals(1, progress.stops)
+    }
+
+    @Test
+    fun `a resend names the companion in the notification`() {
+        val apk = File(tmp.newFolder("sent2"), "base.apk")
+        writeCompanionApk(apk, tizenPackage("com.a", "1.0"))
+        val c = companion("com.a", "1.0").copy(sourceDir = apk.path, label = "Alpha")
+        companions.list = listOf(c)
+        val vm = viewModel(folder = null)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.resend(c)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(progress.updates.all { it.name == "Alpha" && it.total == 1 })
+        assertEquals(1, progress.stops)
     }
 
     @Test

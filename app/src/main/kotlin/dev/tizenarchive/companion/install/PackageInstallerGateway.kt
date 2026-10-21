@@ -7,8 +7,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.IntentSender
 import android.content.pm.PackageInstaller
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import dev.tizenarchive.companion.AppVisibility
+import dev.tizenarchive.companion.R
+import dev.tizenarchive.companion.notify.Notifications
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -103,7 +108,7 @@ internal class PackageInstallerGateway(private val context: Context) : Installer
                 if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                     val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
                     if (confirm != null) {
-                        context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        askForConfirmation(confirm)
                     } else {
                         finish(StatusEvent(PackageInstaller.STATUS_FAILURE, "No confirmation screen", null))
                     }
@@ -119,12 +124,14 @@ internal class PackageInstallerGateway(private val context: Context) : Installer
             }
 
             private fun finish(event: StatusEvent) {
+                NotificationManagerCompat.from(context).cancel(CONFIRM_NOTIFICATION_ID)
                 runCatching { context.unregisterReceiver(this) }
                 if (continuation.isActive) continuation.resume(event) { _, _, _ -> }
             }
         }
         ContextCompat.registerReceiver(context, receiver, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
         continuation.invokeOnCancellation {
+            NotificationManagerCompat.from(context).cancel(CONFIRM_NOTIFICATION_ID)
             runCatching { context.unregisterReceiver(receiver) }
             onCancel()
         }
@@ -140,7 +147,33 @@ internal class PackageInstallerGateway(private val context: Context) : Installer
         }
     }
 
+    /**
+     * Android does not let an app in the background open a window, so then the confirmation goes into a notification
+     * that the user taps; with the app in front it opens right away.
+     */
+    private fun askForConfirmation(confirm: Intent) {
+        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (AppVisibility.inFront || !Notifications.allowed(context)) {
+            context.startActivity(confirm)
+            return
+        }
+        Notifications.ensureChannels(context)
+        val open = PendingIntent.getActivity(context, CONFIRM_NOTIFICATION_ID, confirm, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notification = NotificationCompat.Builder(context, Notifications.CONFIRM_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_watch)
+            .setContentTitle(context.getString(R.string.notification_confirm_title))
+            .setContentText(context.getString(R.string.notification_confirm_text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(R.string.notification_confirm_text)))
+            .setContentIntent(open)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setAutoCancel(true)
+            .build()
+        Notifications.post(context, CONFIRM_NOTIFICATION_ID, notification)
+    }
+
     private companion object {
         const val BUFFER = 64 * 1024
+        const val CONFIRM_NOTIFICATION_ID = 3
     }
 }

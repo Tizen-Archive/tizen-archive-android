@@ -16,7 +16,9 @@ import dev.tizenarchive.companion.files.PackagePreviews
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.Installer
 import dev.tizenarchive.companion.install.UninstallOutcome
+import dev.tizenarchive.companion.notify.ProgressInfo
 import dev.tizenarchive.companion.notify.QueueNotifications
+import dev.tizenarchive.companion.notify.QueueProgress
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -158,5 +160,19 @@ internal class FakeNotifier : QueueNotifications {
 
     override fun cancel() {
         cancelled++
+    }
+}
+
+internal class FakeProgress : QueueProgress {
+    override var onCancel: (() -> Unit)? = null
+    val updates = mutableListOf<ProgressInfo>()
+    var stops = 0
+
+    override fun update(info: ProgressInfo) {
+        updates += info
+    }
+
+    override fun stop() {
+        stops++
     }
 }
