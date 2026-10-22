@@ -767,7 +767,13 @@ private fun WifiWatchTab(padding: PaddingValues, state: UiState, actions: MainAc
                 val shown = list.packages
                     .filter { needle.isEmpty() || it.name.contains(needle, ignoreCase = true) || it.id.contains(needle, ignoreCase = true) }
                     .sortedWith(compareBy({ it.id !in ours }, { it.name.lowercase() }))
-                item { Text(stringResource(R.string.watch_wifi_count, list.packages.size), style = MaterialTheme.typography.bodySmall) }
+                item {
+                    val total = list.packages.size
+                    Text(
+                        if (needle.isEmpty()) stringResource(R.string.watch_wifi_count, total) else stringResource(R.string.watch_wifi_shown, shown.size, total),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 if (shown.isEmpty()) item { Text(stringResource(R.string.watch_wifi_nothing)) }
                 items(shown, key = { it.id }) { item ->
                     Card(modifier = Modifier.fillMaxWidth()) {

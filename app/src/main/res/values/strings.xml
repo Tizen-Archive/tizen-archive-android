@@ -130,10 +130,11 @@
     <string name="tab_watch_wifi">On the watch</string>
     <string name="reinstall_option">Install again even if the watch already has the version</string>
     <string name="state_already_on_watch">Already on the watch (v%1$s), skipped. Turn on “Install again even if the watch already has the version” to install it anyway.</string>
-    <string name="watch_wifi_intro">The packages the watch itself reports, system ones included. Only packages installed by this app can be removed here; removing a package also deletes its data on the watch.</string>
+    <string name="watch_wifi_intro">System packages are listed too. Only packages installed by this app can be removed here; removing a package also deletes its data on the watch.</string>
     <string name="watch_wifi_refresh">Refresh</string>
     <string name="watch_wifi_loading">Asking the watch…</string>
     <string name="watch_wifi_count">Packages on the watch: %1$d</string>
+    <string name="watch_wifi_shown">Shown %1$d of %2$d packages</string>
     <string name="watch_wifi_search">Search by name or id</string>
     <string name="watch_wifi_nothing">Nothing found</string>
     <string name="watch_wifi_ours">Installed by this app on %1$s</string>
