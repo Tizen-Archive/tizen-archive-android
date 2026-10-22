@@ -15,8 +15,8 @@ android {
         applicationId = "dev.tizenarchive.companion"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
         // The catalog address is fixed in the app; a link can never change it. Override for local development:
         // ./gradlew :app:assembleDebug -PcatalogUrl=http://192.168.0.10:8080
         buildConfigField("String", "CATALOG_URL", "\"${providers.gradleProperty("catalogUrl").orElse("https://tizen-archive.com").get()}\"")
