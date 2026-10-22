@@ -1,1 +1,1 @@
-Установка приложений и циферблатов Tizen на часы Samsung через Galaxy Wearable
+Установка приложений Tizen на часы Samsung по Wi-Fi или через Galaxy Wearable
