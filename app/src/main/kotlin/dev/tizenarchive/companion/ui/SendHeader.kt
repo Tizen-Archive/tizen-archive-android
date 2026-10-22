@@ -51,6 +51,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 
 /** Whether the chosen way of sending has what it needs; drives the status line and whether the setup opens by itself. */
 internal enum class Readiness { READY, NO_ADDRESS, BAD_ADDRESS, MISSING }
@@ -92,63 +94,25 @@ internal fun SendHeader(state: UiState, actions: MainActions, modifier: Modifier
         }
     }
 
-    Column(modifier = modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 16.dp)) {
-        Text(stringResource(R.string.send_caption), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            val modes = listOf(
-                InstallMode.COMPANION to (R.string.mode_companion to R.string.mode_companion_sub),
-                InstallMode.WIFI to (R.string.mode_wifi to R.string.mode_wifi_sub),
-            )
-            modes.forEachIndexed { index, (mode, labels) ->
-                SegmentedButton(
-                    selected = state.mode == mode,
-                    onClick = {
-                        if (mode != state.mode) switchedByUser = true
-                        actions.setMode(mode)
-                    },
-                    shape = SegmentedButtonDefaults.itemShape(index, modes.size),
-                    enabled = !state.installing,
-                    modifier = Modifier.heightIn(min = 56.dp),
-                    label = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(stringResource(labels.first), maxLines = 2, textAlign = TextAlign.Center)
-                            Text(stringResource(labels.second), style = MaterialTheme.typography.labelSmall, maxLines = 2, textAlign = TextAlign.Center)
-                        }
-                    },
-                )
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val caption = stringResource(R.string.send_caption)
+    val switch: @Composable (Modifier) -> Unit = { m -> ModeSwitch(state, actions, onSwitched = { switchedByUser = true }, modifier = m) }
+    val status: @Composable (Modifier) -> Unit = { m -> StatusLine(state, readiness, onClick = { showSetup = true }, modifier = m) }
+    if (landscape) {
+        // The screen is short: the switch and the status share one row and the caption is only read out
+        Column(modifier = modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                switch(Modifier.weight(1f).semantics { contentDescription = caption })
+                status(Modifier.weight(1f))
             }
+            if (state.installing) LockedNote()
         }
-        if (state.installing) {
-            Text(stringResource(R.string.mode_locked), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        val ready = readiness == Readiness.READY
-        val status = when (readiness) {
-            Readiness.READY ->
-                if (state.mode == InstallMode.WIFI) stringResource(R.string.status_wifi_ready, state.watchAddress.trim()) else stringResource(R.string.status_wearable_ready)
-            Readiness.NO_ADDRESS -> stringResource(R.string.status_wifi_no_address)
-            Readiness.BAD_ADDRESS -> stringResource(R.string.status_wifi_bad_address)
-            Readiness.MISSING -> stringResource(R.string.status_wearable_setup)
-        }
-        val toggleLabel = stringResource(R.string.setup_toggle)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .clickable(role = Role.Button) { showSetup = true }
-                .semantics(mergeDescendants = true) { contentDescription = "$toggleLabel: $status" },
-        ) {
-            // A tick or a warning sign next to the text: the state is never carried by colour alone
-            Icon(
-                imageVector = if (ready) Glyphs.Check else Glyphs.Warning,
-                contentDescription = null,
-                tint = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            Icon(imageVector = Glyphs.ChevronRight, contentDescription = null, modifier = Modifier.size(24.dp))
+    } else {
+        Column(modifier = modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 16.dp)) {
+            Text(caption, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            switch(Modifier.padding(top = 4.dp))
+            if (state.installing) LockedNote()
+            status(Modifier)
         }
     }
 
@@ -211,6 +175,72 @@ private fun SetupSheet(state: UiState, actions: MainActions, onClose: () -> Unit
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             ) { Text(stringResource(R.string.setup_done)) }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModeSwitch(state: UiState, actions: MainActions, onSwitched: () -> Unit, modifier: Modifier = Modifier) {
+    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
+        val modes = listOf(
+            InstallMode.COMPANION to (R.string.mode_companion to R.string.mode_companion_sub),
+            InstallMode.WIFI to (R.string.mode_wifi to R.string.mode_wifi_sub),
+        )
+        modes.forEachIndexed { index, (mode, labels) ->
+            SegmentedButton(
+                selected = state.mode == mode,
+                onClick = {
+                    if (mode != state.mode) onSwitched()
+                    actions.setMode(mode)
+                },
+                shape = SegmentedButtonDefaults.itemShape(index, modes.size),
+                enabled = !state.installing,
+                modifier = Modifier.heightIn(min = 56.dp),
+                label = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(labels.first), maxLines = 2, textAlign = TextAlign.Center)
+                        Text(stringResource(labels.second), style = MaterialTheme.typography.labelSmall, maxLines = 2, textAlign = TextAlign.Center)
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LockedNote() {
+    Text(stringResource(R.string.mode_locked), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun StatusLine(state: UiState, readiness: Readiness, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val ready = readiness == Readiness.READY
+    val status = when (readiness) {
+        Readiness.READY ->
+            if (state.mode == InstallMode.WIFI) stringResource(R.string.status_wifi_ready, state.watchAddress.trim()) else stringResource(R.string.status_wearable_ready)
+        Readiness.NO_ADDRESS -> stringResource(R.string.status_wifi_no_address)
+        Readiness.BAD_ADDRESS -> stringResource(R.string.status_wifi_bad_address)
+        Readiness.MISSING -> stringResource(R.string.status_wearable_setup)
+    }
+    val toggleLabel = stringResource(R.string.setup_toggle)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = "$toggleLabel: $status" },
+    ) {
+        // A tick or a warning sign next to the text: the state is never carried by colour alone
+        Icon(
+            imageVector = if (ready) Glyphs.Check else Glyphs.Warning,
+            contentDescription = null,
+            tint = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Icon(imageVector = Glyphs.ChevronRight, contentDescription = null, modifier = Modifier.size(24.dp))
     }
 }
 
