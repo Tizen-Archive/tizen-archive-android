@@ -1,10 +1,13 @@
 package dev.tizenarchive.companion
 
+import android.Manifest
 import android.app.Application
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import dev.tizenarchive.companion.build.CompanionBuilder
@@ -27,10 +30,20 @@ import dev.tizenarchive.companion.notify.QueueNotifier
 import dev.tizenarchive.companion.notify.QueueProgress
 import dev.tizenarchive.companion.notify.QueueProgressNotifier
 import dev.tizenarchive.companion.signing.KeystoreSigningKey
+import dev.tizenarchive.companion.wifi.KeystoreSdbKey
+import dev.tizenarchive.companion.wifi.WatchGateway
+import dev.tizenarchive.companion.wifi.WatchHistoryMemory
+import dev.tizenarchive.companion.wifi.WatchHistoryStore
+import dev.tizenarchive.companion.wifi.WatchSettingsMemory
+import dev.tizenarchive.companion.wifi.WatchSettingsStore
+import dev.tizenarchive.companion.wifi.WifiWatchGateway
 import java.io.File
 import java.io.InputStream
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+
+/** The first Android version with the local network permission. */
+internal const val LOCAL_NETWORK_API = 37
 
 /** The few things the app asks the Android system directly; tests replace them. */
 internal interface Platform {
@@ -38,10 +51,16 @@ internal interface Platform {
 
     fun canRequestPackageInstalls(): Boolean
 
+    /** Since Android 17 the local network, where the watch is, is closed to apps without this permission. */
+    fun hasLocalNetworkAccess(): Boolean
+
     fun isInstalled(packageName: String): Boolean
 
     /** Milliseconds since boot, used to space out deliveries to Gear Plugin. */
     fun elapsedRealtime(): Long
+
+    /** Wall-clock time, for "installed on" dates. */
+    fun nowMillis(): Long
 
     fun openInput(uri: Uri): InputStream?
 
@@ -55,9 +74,15 @@ internal class AndroidPlatform(private val context: Context) : Platform {
 
     override fun canRequestPackageInstalls(): Boolean = context.packageManager.canRequestPackageInstalls()
 
+    override fun hasLocalNetworkAccess(): Boolean =
+        Build.VERSION.SDK_INT < LOCAL_NETWORK_API ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED
+
     override fun isInstalled(packageName: String): Boolean = runCatching { context.packageManager.getPackageInfo(packageName, 0) }.isSuccess
 
     override fun elapsedRealtime(): Long = SystemClock.elapsedRealtime()
+
+    override fun nowMillis(): Long = System.currentTimeMillis()
 
     override fun openInput(uri: Uri): InputStream? = context.contentResolver.openInputStream(uri)
 
@@ -91,6 +116,9 @@ internal class Dependencies(
     val previews: PackagePreviews,
     val notifier: QueueNotifications,
     val progress: QueueProgress,
+    val watch: WatchGateway,
+    val watchSettings: WatchSettingsMemory,
+    val watchHistory: WatchHistoryMemory,
     val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     companion object {
@@ -112,6 +140,9 @@ internal class Dependencies(
                 previews = PreviewLoader(application),
                 notifier = QueueNotifier(application),
                 progress = QueueProgressNotifier(application),
+                watch = WifiWatchGateway(application, KeystoreSdbKey()),
+                watchSettings = WatchSettingsStore(application),
+                watchHistory = WatchHistoryStore(application),
             )
         }
     }

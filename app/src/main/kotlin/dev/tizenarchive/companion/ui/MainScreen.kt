@@ -24,28 +24,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,16 +63,31 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.tizenarchive.companion.LOCAL_NETWORK_API
 import dev.tizenarchive.companion.R
 import dev.tizenarchive.companion.catalog.CatalogError
 import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.files.PackagePreview
+import dev.tizenarchive.companion.sdb.SdbError
 import dev.tizenarchive.companion.signature.SignatureAssessment
 import dev.tizenarchive.companion.signature.SignatureVerdict
+import dev.tizenarchive.companion.wifi.InstallMode
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarState
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
+import androidx.compose.ui.text.font.FontWeight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,7 +108,7 @@ internal fun MainScreen(viewModel: MainViewModel) {
     // Ask once for the right to show "queue finished"; the queue starts either way
     var notificationsAsked by rememberSaveable { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { viewModel.installSelected() }
-    val startInstall = {
+    val proceed = {
         val needsAsk = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.selected.size > 1 && !notificationsAsked &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         if (needsAsk) {
@@ -101,7 +119,42 @@ internal fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    MainContent(state, viewModel, onPickFolder = { picker.launch(null) }, onInstall = startInstall)
+    // Android 17 closes the local network to apps that have not been allowed to use it; the watch is on the local network
+    var localNetworkAsked by rememberSaveable { mutableStateOf(false) }
+    val localNetworkPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { proceed() }
+    val startInstall = {
+        val needsLocalNetwork = state.mode == InstallMode.WIFI && Build.VERSION.SDK_INT >= LOCAL_NETWORK_API && !localNetworkAsked &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+        if (needsLocalNetwork) {
+            localNetworkAsked = true
+            localNetworkPermission.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+        } else {
+            proceed()
+        }
+    }
+
+    // The search and the watch's package list need the same permission as the install, so it is asked for before the first use
+    var afterPermission by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val localNetworkForActions = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { afterPermission?.invoke() }
+    val actions = remember(viewModel, state.mode) {
+        fun withLocalNetwork(action: () -> Unit) {
+            val needs = Build.VERSION.SDK_INT >= LOCAL_NETWORK_API &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+            if (needs) {
+                afterPermission = action
+                localNetworkForActions.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+            } else {
+                action()
+            }
+        }
+        object : MainActions by viewModel {
+            override fun findWatches() = withLocalNetwork(viewModel::findWatches)
+
+            override fun refreshWatchList() = withLocalNetwork(viewModel::refreshWatchList)
+        }
+    }
+
+    MainContent(state, actions, onPickFolder = { picker.launch(null) }, onInstall = startInstall)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,16 +162,47 @@ internal fun MainScreen(viewModel: MainViewModel) {
 internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () -> Unit, onInstall: () -> Unit) {
     val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(TAB_INSTALL) }
+    // Opening the tab asks the watch for its packages once
+    LaunchedEffect(tab, state.mode) {
+        if (tab == TAB_WATCH && state.mode == InstallMode.WIFI && state.watchList == WatchListState.Idle) actions.refreshWatchList()
+    }
+    // Each page keeps its own scroll position, also across switching tabs and the way of sending
+    val installList = rememberLazyListState()
+    val companionList = rememberLazyListState()
+    val wifiList = rememberLazyListState()
+    // The way of sending slides away when scrolling down and comes back on scrolling up; the tabs stay
+    val headerScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    LaunchedEffect(state.hasSetupProblem()) { if (state.hasSetupProblem()) headerScroll.state.heightOffset = 0f }
     Scaffold(
+        modifier = Modifier.nestedScroll(headerScroll.nestedScrollConnection),
         topBar = {
-            Column {
-                TopAppBar(title = { Text(stringResource(R.string.app_name)) })
+            // No title bar: the screen is small and the launcher already shows the name. Everything keeps clear of the status bar.
+            Column(modifier = Modifier.statusBarsPadding()) {
+                CollapsingHeader(headerScroll.state) { SendHeader(state, actions) }
                 PrimaryTabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == TAB_INSTALL, onClick = { tab = TAB_INSTALL }, text = { Text(stringResource(R.string.tab_install)) })
+                    // The chosen tab is also bold: with the system's dynamic colours the two label colours can be close
+                    val selectedColor = MaterialTheme.colorScheme.primary
+                    val otherColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    Tab(
+                        selected = tab == TAB_INSTALL,
+                        onClick = { tab = TAB_INSTALL },
+                        selectedContentColor = selectedColor,
+                        unselectedContentColor = otherColor,
+                        text = {
+                            Text(stringResource(R.string.tab_install), fontWeight = if (tab == TAB_INSTALL) FontWeight.Bold else FontWeight.Normal)
+                        },
+                    )
                     Tab(
                         selected = tab == TAB_WATCH,
                         onClick = { tab = TAB_WATCH },
-                        text = { Text(stringResource(R.string.tab_watch, state.companions.size)) },
+                        selectedContentColor = selectedColor,
+                        unselectedContentColor = otherColor,
+                        text = {
+                            Text(
+                                if (state.mode == InstallMode.WIFI) stringResource(R.string.tab_watch_wifi) else stringResource(R.string.tab_watch, state.companions.size),
+                                fontWeight = if (tab == TAB_WATCH) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        },
                     )
                 }
             }
@@ -134,32 +218,37 @@ internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () 
         },
     ) { padding ->
         if (tab == TAB_WATCH) {
-            WatchTab(
-                padding,
-                state.companions,
-                states = state.states,
-                installing = state.installing,
-                updates = state.updates,
-                updateCheck = state.updateCheck,
-                onCheckUpdates = actions::checkUpdates,
-                onUpdate = actions::update,
-                onResend = actions::resend,
-                onCancel = actions::cancel,
-                onRemove = actions::askRemoval,
-            )
+            Crossfade(targetState = state.mode, animationSpec = tween(CROSSFADE_MS), label = "watch tab") { mode ->
+                if (mode == InstallMode.WIFI) {
+                    WifiWatchTab(padding, state, actions, wifiList)
+                } else {
+                    WatchTab(
+                        padding,
+                        companionList,
+                        state.companions,
+                        states = state.states,
+                        installing = state.installing,
+                        updates = state.updates,
+                        updateCheck = state.updateCheck,
+                        onCheckUpdates = actions::checkUpdates,
+                        onUpdate = actions::update,
+                        onResend = actions::resend,
+                        onCancel = actions::cancel,
+                        onRemove = actions::askRemoval,
+                    )
+                }
+            }
             return@Scaffold
         }
         // One scrolling list: on a small screen or with a long status text nothing is pushed out of view.
         LazyColumn(
+            state = installList,
             modifier = Modifier
                 .padding(padding)
                 .padding(horizontal = 16.dp)
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (state.missing.isNotEmpty()) {
-                item { MissingCard(state.missing) }
-            }
             item { FolderCard(state, onPick = { onPickFolder() }) }
             if (state.incomingRejected > 0) {
                 item {
@@ -205,7 +294,7 @@ internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () 
                     HorizontalDivider()
                 }
             }
-            if (state.installed > 0) {
+            if (state.installed > 0 && state.mode == InstallMode.COMPANION) {
                 item {
                     Text(
                         stringResource(R.string.wearable_note),
@@ -233,7 +322,16 @@ internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () 
     }
 
     state.remote?.let { remote ->
-        RemoteDialog(remote, onConfirm = actions::confirmRemote, onDismiss = actions::dismissRemote)
+        val route = if (state.mode == InstallMode.WIFI) {
+            stringResource(R.string.remote_route_wifi, state.watchAddress.trim())
+        } else {
+            stringResource(R.string.remote_route_companion)
+        }
+        RemoteDialog(remote, route, onConfirm = actions::confirmRemote, onDismiss = actions::dismissRemote)
+    }
+
+    state.watchRemoval?.let { removal ->
+        WatchRemovalDialog(removal, onConfirm = actions::confirmWatchRemoval, onDismiss = actions::dismissWatchRemoval)
     }
 
     if (state.needsInstallPermission) {
@@ -255,6 +353,7 @@ internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () 
     }
 }
 
+
 private const val GALAXY_WEARABLE = "com.samsung.android.app.watchmanager"
 private const val TAB_INSTALL = 0
 private const val TAB_WATCH = 1
@@ -262,6 +361,7 @@ private const val TAB_WATCH = 1
 @Composable
 private fun WatchTab(
     padding: PaddingValues,
+    listState: LazyListState,
     companions: List<InstalledCompanion>,
     states: Map<Uri, ItemState>,
     installing: Boolean,
@@ -275,12 +375,14 @@ private fun WatchTab(
 ) {
     val context = LocalContext.current
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .padding(padding)
             .padding(horizontal = 16.dp)
             .fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        item { SourceNote(stringResource(R.string.source_companion)) }
         item {
             Text(
                 stringResource(R.string.watch_intro),
@@ -322,7 +424,7 @@ private fun WatchTab(
                         Text(
                             describe(itemState),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (itemState is ItemState.Failed || itemState is ItemState.SignatureConflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (itemState.isFailure()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     val update = updates[companion.androidPackage]
@@ -389,7 +491,7 @@ private fun RemovalDialog(removal: RemovalState, onConfirm: () -> Unit, onDismis
 }
 
 @Composable
-private fun RemoteDialog(remote: RemoteState, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun RemoteDialog(remote: RemoteState, route: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val title: String
     val text: String
     var confirmLabel: String? = null
@@ -401,7 +503,7 @@ private fun RemoteDialog(remote: RemoteState, onConfirm: () -> Unit, onDismiss: 
         }
         is RemoteState.Confirm -> {
             title = remote.info.name ?: remote.info.packageId
-            text = stringResource(R.string.remote_confirm_text, remote.info.version, formatSize(remote.artifact.size))
+            text = stringResource(R.string.remote_confirm_text, remote.info.version, formatSize(remote.artifact.size)) + "\n\n" + route
             confirmLabel = stringResource(R.string.install_on_watch)
         }
         is RemoteState.Working -> {
@@ -454,7 +556,7 @@ private fun describe(problem: RemoteProblem): String = when (problem) {
 }
 
 @Composable
-private fun MissingCard(missing: Set<Missing>) {
+internal fun MissingCard(missing: Set<Missing>) {
     val context = LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -569,6 +671,28 @@ private fun describe(state: ItemState): String = when (state) {
     ItemState.Cancelled -> stringResource(R.string.state_cancelled)
     ItemState.SignatureConflict -> stringResource(R.string.state_conflict)
     is ItemState.Failed -> stringResource(R.string.state_failed, state.reason)
+    is ItemState.Uploading -> stringResource(R.string.state_uploading, state.percent)
+    is ItemState.InstallingOnWatch ->
+        state.percent?.let { stringResource(R.string.state_watch_installing_percent, it) } ?: stringResource(R.string.state_watch_installing)
+    ItemState.InstalledOnWatch -> stringResource(R.string.state_done_watch)
+    is ItemState.WatchRefused -> stringResource(R.string.state_watch_refused, refusal(state))
+    is ItemState.WatchProblem -> stringResource(watchProblemText(state.error))
+    ItemState.NoWifi -> stringResource(R.string.state_no_wifi)
+    is ItemState.AlreadyOnWatch -> stringResource(R.string.state_already_on_watch, state.version)
+}
+
+@Composable
+private fun refusal(state: ItemState.WatchRefused): String = listOfNotNull(state.message, state.code?.let { "$it" }).joinToString(" ")
+    .ifEmpty { stringResource(R.string.state_watch_refused_unknown) }
+
+private fun watchProblemText(error: SdbError): Int = when (error) {
+    SdbError.UNREACHABLE -> R.string.watch_problem_unreachable
+    SdbError.BUSY -> R.string.watch_problem_busy
+    SdbError.AUTH_TIMEOUT -> R.string.watch_problem_auth_timeout
+    SdbError.AUTH_REJECTED -> R.string.watch_problem_auth_rejected
+    SdbError.TIMEOUT -> R.string.watch_problem_timeout
+    SdbError.DISCONNECTED, SdbError.SERVICE_REFUSED -> R.string.watch_problem_disconnected
+    SdbError.PROTOCOL -> R.string.watch_problem_protocol
 }
 
 @Composable
@@ -597,3 +721,132 @@ private fun BottomActions(state: UiState, onInstall: () -> Unit, onCancel: () ->
         }
     }
 }
+
+
+@Composable
+private fun WifiWatchTab(padding: PaddingValues, state: UiState, actions: MainActions, listState: LazyListState) {
+    val context = LocalContext.current
+    val ours = remember(state.remembered) { state.remembered.associateBy { it.id } }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .padding(padding)
+            .padding(horizontal = 16.dp)
+            .fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { SourceNote(stringResource(R.string.source_wifi, state.watchAddress.trim())) }
+        item { Text(stringResource(R.string.watch_wifi_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item {
+            OutlinedButton(onClick = actions::refreshWatchList, enabled = !state.installing && state.watchList != WatchListState.Loading) {
+                Text(stringResource(R.string.watch_wifi_refresh))
+            }
+        }
+        if (state.watchAddressInvalid) {
+            item { Text(stringResource(R.string.watch_address_invalid), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+        when (val list = state.watchList) {
+            WatchListState.Idle -> Unit
+            WatchListState.Loading -> item { Text(stringResource(R.string.watch_wifi_loading), style = MaterialTheme.typography.bodySmall) }
+            WatchListState.NoWifi -> item { Text(stringResource(R.string.find_no_wifi), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            WatchListState.NoPermission ->
+                item { Text(stringResource(R.string.find_no_permission), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            is WatchListState.Problem ->
+                item { Text(stringResource(watchProblemText(list.error)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            is WatchListState.Loaded -> {
+                item {
+                    OutlinedTextField(
+                        value = state.watchQuery,
+                        onValueChange = actions::setWatchQuery,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.watch_wifi_search)) },
+                    )
+                }
+                val needle = state.watchQuery.trim()
+                val shown = list.packages
+                    .filter { needle.isEmpty() || it.name.contains(needle, ignoreCase = true) || it.id.contains(needle, ignoreCase = true) }
+                    .sortedWith(compareBy({ it.id !in ours }, { it.name.lowercase() }))
+                item { Text(stringResource(R.string.watch_wifi_count, list.packages.size), style = MaterialTheme.typography.bodySmall) }
+                if (shown.isEmpty()) item { Text(stringResource(R.string.watch_wifi_nothing)) }
+                items(shown, key = { it.id }) { item ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(item.name, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                listOf(item.id, "v${item.version}", item.type.uppercase()).joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            val mine = ours[item.id]
+                            if (mine != null) {
+                                val date = DateUtils.formatDateTime(context, mine.installedAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR)
+                                Text(stringResource(R.string.watch_wifi_ours, date), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                OutlinedButton(onClick = { actions.askWatchRemoval(item) }, enabled = !state.installing) { Text(stringResource(R.string.watch_wifi_remove)) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchRemovalDialog(removal: WatchRemoval, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val item = when (removal) {
+        is WatchRemoval.Confirm -> removal.item
+        is WatchRemoval.Working -> removal.item
+        is WatchRemoval.Failed -> removal.item
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.watch_remove_title, item.name)) },
+        text = {
+            Text(
+                when (removal) {
+                    is WatchRemoval.Confirm -> stringResource(R.string.watch_remove_message)
+                    is WatchRemoval.Working -> stringResource(R.string.watch_remove_working)
+                    is WatchRemoval.Failed ->
+                        stringResource(R.string.watch_remove_refused, removal.refusal ?: removal.error?.let { stringResource(watchProblemText(it)) }.orEmpty())
+                },
+            )
+        },
+        confirmButton = {
+            if (removal is WatchRemoval.Confirm) TextButton(onClick = onConfirm) { Text(stringResource(R.string.watch_wifi_remove)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = removal !is WatchRemoval.Working) {
+                Text(stringResource(if (removal is WatchRemoval.Failed) R.string.ok else R.string.cancel))
+            }
+        },
+    )
+}
+
+
+/** Says where the list of the "On the watch" tab comes from: the two ways of sending show different things under the same name. */
+@Composable
+private fun SourceNote(text: String) {
+    Text(text, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+}
+
+/** A header that follows the scroll offset of [state]: it slides up out of view and back; the offset limit is its own height. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CollapsingHeader(state: TopAppBarState, content: @Composable () -> Unit) {
+    Layout(content = content, modifier = Modifier.clipToBounds()) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)) }
+        val full = placeables.sumOf { it.height }
+        state.heightOffsetLimit = -full.toFloat()
+        val offset = state.heightOffset.roundToInt().coerceIn(-full, 0)
+        layout(constraints.maxWidth, full + offset) {
+            var y = offset
+            for (placeable in placeables) {
+                placeable.placeRelative(0, y)
+                y += placeable.height
+            }
+        }
+    }
+}
+
+private const val CROSSFADE_MS = 200

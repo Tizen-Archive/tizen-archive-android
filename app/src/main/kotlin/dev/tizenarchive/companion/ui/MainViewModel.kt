@@ -23,7 +23,21 @@ import dev.tizenarchive.companion.files.PackagePreview
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.UninstallOutcome
 import dev.tizenarchive.companion.notify.ProgressInfo
+import dev.tizenarchive.companion.sdb.InstallProgress
+import dev.tizenarchive.companion.sdb.PackageType
+import dev.tizenarchive.companion.sdb.SdbError
+import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.sdb.WatchAddress
+import dev.tizenarchive.companion.tizen.TizenPackageKind
 import dev.tizenarchive.companion.tizen.TizenPackageReader
+import dev.tizenarchive.companion.wifi.FindOutcome
+import dev.tizenarchive.companion.wifi.InstallMode
+import dev.tizenarchive.companion.wifi.PackageIdentity
+import dev.tizenarchive.companion.wifi.RememberedPackage
+import dev.tizenarchive.companion.wifi.WatchListOutcome
+import dev.tizenarchive.companion.wifi.WatchOutcome
+import dev.tizenarchive.companion.wifi.WatchRemoveOutcome
+import dev.tizenarchive.companion.wifi.WatchSettings
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -53,6 +67,15 @@ internal interface MainActions {
     fun confirmRemote()
     fun dismissRemote()
     fun dismissPermissionDialog()
+    fun setMode(mode: InstallMode)
+    fun setWatchAddress(address: String)
+    fun findWatches()
+    fun setReinstall(reinstall: Boolean)
+    fun refreshWatchList()
+    fun setWatchQuery(query: String)
+    fun askWatchRemoval(item: WatchPackage)
+    fun confirmWatchRemoval()
+    fun dismissWatchRemoval()
 }
 
 /** The key under which the state of sending a companion again is kept (the list items use their file URI). */
@@ -74,6 +97,63 @@ internal sealed interface ItemState {
 
     /** A helper app with this name exists but is signed with another key, so it cannot be updated. */
     data object SignatureConflict : ItemState
+
+    /** Wi-Fi mode: the package is being sent to the watch. */
+    data class Uploading(val percent: Int) : ItemState
+
+    /** Wi-Fi mode: the watch is installing; [percent] is null until it reports the first value. */
+    data class InstallingOnWatch(val percent: Int?) : ItemState
+
+    data object InstalledOnWatch : ItemState
+
+    /** Wi-Fi mode: the watch refused the package; [code] and [message] come from its package manager. */
+    data class WatchRefused(val code: Int?, val message: String?) : ItemState
+
+    data class WatchProblem(val error: SdbError) : ItemState
+
+    data object NoWifi : ItemState
+
+    /** Wi-Fi mode: the watch already has this version or a newer one. */
+    data class AlreadyOnWatch(val version: String) : ItemState
+}
+
+internal fun ItemState?.isFailure(): Boolean = this is ItemState.Failed || this is ItemState.SignatureConflict || this is ItemState.WatchRefused ||
+    this is ItemState.WatchProblem || this is ItemState.NoWifi
+
+private fun ItemState.isFinal(): Boolean = this is ItemState.Installed || this is ItemState.InstalledOnWatch || this is ItemState.AlreadySent ||
+    this is ItemState.Cancelled || this is ItemState.Failed || this is ItemState.SignatureConflict || this is ItemState.WatchRefused ||
+    this is ItemState.WatchProblem || this is ItemState.NoWifi || this is ItemState.AlreadyOnWatch
+
+/** A watch found by the search; [busy] means another sdb host is connected to it right now. */
+internal data class FoundAddress(val address: String, val busy: Boolean)
+
+/** What the watch reports about its packages (Wi-Fi mode). */
+internal sealed interface WatchListState {
+    data object Idle : WatchListState
+    data object Loading : WatchListState
+    data class Loaded(val packages: List<WatchPackage>) : WatchListState
+    data class Problem(val error: SdbError) : WatchListState
+    data object NoWifi : WatchListState
+    data object NoPermission : WatchListState
+}
+
+internal sealed interface WatchRemoval {
+    data class Confirm(val item: WatchPackage) : WatchRemoval
+    data class Working(val item: WatchPackage) : WatchRemoval
+
+    /** [refusal] is the text from the watch; [error] is a connection problem. */
+    data class Failed(val item: WatchPackage, val refusal: String?, val error: SdbError?) : WatchRemoval
+}
+
+internal sealed interface ScanState {
+    data object Idle : ScanState
+    data object Scanning : ScanState
+    data class Done(val watches: List<FoundAddress>) : ScanState
+    data object NoWifi : ScanState
+    data object NoSubnet : ScanState
+
+    /** The local network permission is missing, so the phone cannot see the watch. */
+    data object NoPermission : ScanState
 }
 
 /** What went wrong while handling a link from the website. */
@@ -138,6 +218,18 @@ internal data class UiState(
     val updateCheck: UpdateCheck = UpdateCheck.Idle,
     val companions: List<InstalledCompanion> = emptyList(),
     val removal: RemovalState? = null,
+    val mode: InstallMode = InstallMode.COMPANION,
+    val watchAddress: String = "",
+    /** The address field is shown as wrong after a start with an address that is not a private IPv4 one. */
+    val watchAddressInvalid: Boolean = false,
+    val scan: ScanState = ScanState.Idle,
+    /** Wi-Fi mode: install again even when the watch already has the version. */
+    val reinstall: Boolean = false,
+    val watchList: WatchListState = WatchListState.Idle,
+    val watchQuery: String = "",
+    val watchRemoval: WatchRemoval? = null,
+    /** Packages this app put on the watch; only these can be removed from the app. */
+    val remembered: List<RememberedPackage> = emptyList(),
 ) {
     val allFiles: List<PackageFile> get() = incoming + files
 
@@ -153,9 +245,9 @@ internal data class UiState(
             }
         }
 
-    val installed: Int get() = states.values.count { it is ItemState.Installed }
-    val skipped: Int get() = states.values.count { it is ItemState.AlreadySent }
-    val failed: Int get() = states.values.count { it is ItemState.Failed || it is ItemState.SignatureConflict }
+    val installed: Int get() = states.values.count { it is ItemState.Installed || it is ItemState.InstalledOnWatch }
+    val skipped: Int get() = states.values.count { it is ItemState.AlreadySent || it is ItemState.AlreadyOnWatch }
+    val failed: Int get() = states.values.count { it.isFailure() }
     val cancelled: Int get() = states.values.count { it is ItemState.Cancelled }
 }
 
@@ -181,11 +273,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     private var position = Triple(1, 1, null as String?)
 
     private fun report(state: ItemState) {
-        if (state is ItemState.Installed || state is ItemState.AlreadySent || state is ItemState.Cancelled ||
-            state is ItemState.Failed || state is ItemState.SignatureConflict
-        ) {
-            return
-        }
+        if (state.isFinal()) return
         progress.update(ProgressInfo(position.first, position.second, position.third, state))
     }
 
@@ -196,14 +284,28 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     private var lastInstallMark: Long? = null
     private var lastPace: Long = 0
 
+    /** Clears what an earlier run left in the cache; files received from other apps must wait for it, or it deletes them. */
+    private val cleanup: Job
+
     init {
         progress.onCancel = ::cancel
-        viewModelScope.launch {
+        cleanup = viewModelScope.launch {
             withContext(io) {
                 workDir.deleteRecursively()
                 File(platform.cacheDir, INCOMING_DIR).deleteRecursively()
             }
+        }
+        viewModelScope.launch {
+            cleanup.join()
             folders.load()?.let { openFolder(it) }
+        }
+        viewModelScope.launch {
+            val saved = withContext(io) { deps.watchSettings.load() }
+            _state.update { it.copy(mode = saved.mode, watchAddress = saved.address, reinstall = saved.reinstall) }
+        }
+        viewModelScope.launch {
+            val items = withContext(io) { deps.watchHistory.load() }
+            _state.update { it.copy(remembered = items) }
         }
         refreshCompanions()
         refreshMissing()
@@ -365,12 +467,152 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     override fun dismissPermissionDialog() = _state.update { it.copy(needsInstallPermission = false) }
 
-    fun installSelected() {
+    // ---- Delivery mode and the watch's address ------------------------------------------------------------
+
+    override fun setMode(mode: InstallMode) {
         if (_state.value.installing) return
-        if (!platform.canRequestPackageInstalls()) {
-            _state.update { it.copy(needsInstallPermission = true) }
+        _state.update { it.copy(mode = mode, watchAddressInvalid = false) }
+        saveSettings()
+    }
+
+    override fun setWatchAddress(address: String) {
+        _state.update { it.copy(watchAddress = address, watchAddressInvalid = false) }
+        saveSettings()
+    }
+
+    override fun setReinstall(reinstall: Boolean) {
+        _state.update { it.copy(reinstall = reinstall) }
+        saveSettings()
+    }
+
+    // ---- The watch's packages (Wi-Fi mode) ---------------------------------------------------------------
+
+    override fun setWatchQuery(query: String) = _state.update { it.copy(watchQuery = query) }
+
+    override fun refreshWatchList() {
+        val current = _state.value
+        if (current.mode != InstallMode.WIFI || current.installing || current.watchList == WatchListState.Loading) return
+        val address = WatchAddress.parse(current.watchAddress.trim())
+        if (address == null) {
+            _state.update { it.copy(watchAddressInvalid = true) }
             return
         }
+        if (!platform.hasLocalNetworkAccess()) {
+            _state.update { it.copy(watchList = WatchListState.NoPermission) }
+            return
+        }
+        _state.update { it.copy(watchList = WatchListState.Loading) }
+        viewModelScope.launch {
+            val next = try {
+                when (val outcome = deps.watch.list(address)) {
+                    is WatchListOutcome.Listed -> WatchListState.Loaded(outcome.packages)
+                    is WatchListOutcome.Problem -> WatchListState.Problem(outcome.error)
+                    WatchListOutcome.NoWifi -> WatchListState.NoWifi
+                }
+            } catch (e: CancellationException) {
+                _state.update { it.copy(watchList = WatchListState.Idle) }
+                throw e
+            } catch (e: Exception) {
+                WatchListState.Problem(SdbError.DISCONNECTED)
+            }
+            _state.update { it.copy(watchList = next) }
+        }
+    }
+
+    override fun askWatchRemoval(item: WatchPackage) {
+        val current = _state.value
+        if (current.installing || current.watchRemoval is WatchRemoval.Working) return
+        // Only what this app installed can be removed from here: the watch does not tell system packages apart
+        if (current.remembered.none { it.id == item.id }) return
+        _state.update { it.copy(watchRemoval = WatchRemoval.Confirm(item)) }
+    }
+
+    override fun dismissWatchRemoval() {
+        if (_state.value.watchRemoval is WatchRemoval.Working) return
+        _state.update { it.copy(watchRemoval = null) }
+    }
+
+    override fun confirmWatchRemoval() {
+        val confirm = _state.value.watchRemoval as? WatchRemoval.Confirm ?: return
+        val item = confirm.item
+        val address = WatchAddress.parse(_state.value.watchAddress.trim())
+        if (address == null) {
+            _state.update { it.copy(watchRemoval = null, watchAddressInvalid = true) }
+            return
+        }
+        _state.update { it.copy(watchRemoval = WatchRemoval.Working(item)) }
+        viewModelScope.launch {
+            val failure = try {
+                when (val outcome = deps.watch.remove(address, item.id)) {
+                    WatchRemoveOutcome.Removed -> null
+                    is WatchRemoveOutcome.Refused -> WatchRemoval.Failed(item, listOfNotNull(outcome.message, outcome.code?.toString()).joinToString(" "), null)
+                    is WatchRemoveOutcome.Problem -> WatchRemoval.Failed(item, null, outcome.error)
+                    WatchRemoveOutcome.NoWifi -> WatchRemoval.Failed(item, null, SdbError.UNREACHABLE)
+                }
+            } catch (e: CancellationException) {
+                _state.update { it.copy(watchRemoval = null) }
+                throw e
+            } catch (e: Exception) {
+                WatchRemoval.Failed(item, null, SdbError.DISCONNECTED)
+            }
+            if (failure != null) {
+                _state.update { it.copy(watchRemoval = failure) }
+                return@launch
+            }
+            withContext(io) { deps.watchHistory.forget(item.id) }
+            _state.update { state ->
+                val list = (state.watchList as? WatchListState.Loaded)?.let { WatchListState.Loaded(it.packages.filterNot { p -> p.id == item.id }) } ?: state.watchList
+                state.copy(watchRemoval = null, watchList = list, remembered = state.remembered.filterNot { it.id == item.id })
+            }
+        }
+    }
+
+    override fun findWatches() {
+        if (_state.value.installing || _state.value.scan == ScanState.Scanning) return
+        if (!platform.hasLocalNetworkAccess()) {
+            _state.update { it.copy(scan = ScanState.NoPermission) }
+            return
+        }
+        _state.update { it.copy(scan = ScanState.Scanning) }
+        viewModelScope.launch {
+            val next = try {
+                when (val outcome = deps.watch.find()) {
+                    is FindOutcome.Found -> ScanState.Done(outcome.watches.map { FoundAddress(it.address.hostAddress.orEmpty(), it.busy) })
+                    FindOutcome.NoWifi -> ScanState.NoWifi
+                    FindOutcome.NoSubnet -> ScanState.NoSubnet
+                }
+            } catch (e: CancellationException) {
+                _state.update { it.copy(scan = ScanState.Idle) }
+                throw e
+            } catch (e: Exception) {
+                ScanState.Done(emptyList())
+            }
+            _state.update { it.copy(scan = next) }
+            // One watch found: no need to choose
+            (next as? ScanState.Done)?.watches?.singleOrNull()?.let { setWatchAddress(it.address) }
+        }
+    }
+
+    private fun saveSettings() {
+        val current = _state.value
+        viewModelScope.launch { withContext(io) { deps.watchSettings.save(WatchSettings(current.mode, current.watchAddress, current.reinstall)) } }
+    }
+
+    /** False when the mode needs something the user has not provided yet; the screen shows what. */
+    private fun readyToDeliver(): Boolean {
+        if (_state.value.mode == InstallMode.WIFI) {
+            if (WatchAddress.parse(_state.value.watchAddress.trim()) != null) return true
+            _state.update { it.copy(watchAddressInvalid = true) }
+            return false
+        }
+        if (platform.canRequestPackageInstalls()) return true
+        _state.update { it.copy(needsInstallPermission = true) }
+        return false
+    }
+
+    fun installSelected() {
+        if (_state.value.installing) return
+        if (!readyToDeliver()) return
         val queue = _state.value.allFiles.filter { it.uri in _state.value.selected }
         if (queue.isEmpty()) return
         _state.update { it.copy(installing = true, states = queue.associate { f -> f.uri to ItemState.Queued }) }
@@ -390,7 +632,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                     notifier.notifyDone(
                         sent = states.values.count { it is ItemState.Installed },
                         skipped = states.values.count { it is ItemState.AlreadySent },
-                        failed = states.values.count { it is ItemState.Failed || it is ItemState.SignatureConflict },
+                        failed = states.values.count { it.isFailure() },
                         cancelled = states.values.count { it is ItemState.Cancelled },
                     )
                 }
@@ -412,6 +654,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     fun onIncoming(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
+            cleanup.join()
             val (accepted, rejected) = withContext(io) { copyIncoming(uris.take(MAX_INCOMING)) }
             _state.update { state ->
                 val known = state.incoming.map { it.uri }.toSet()
@@ -491,10 +734,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     override fun confirmRemote() {
         val confirm = _state.value.remote as? RemoteState.Confirm ?: return
-        if (!platform.canRequestPackageInstalls()) {
-            _state.update { it.copy(needsInstallPermission = true) }
-            return
-        }
+        if (!readyToDeliver()) return
         val title = confirm.info.name ?: confirm.info.packageId
         position = Triple(1, 1, title)
         fun set(item: ItemState) {
@@ -520,7 +760,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                             }
                         }
                     }
-                    buildAndInstall(local, ::set)
+                    deliver(local, ::set)
                 }
             } finally {
                 _state.update { it.copy(installing = false, remote = RemoteState.Finished(title, final)) }
@@ -586,7 +826,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                 val sentAt = withContext(io) { sentAt(local) }
                 if (sentAt != null) return@runCatchingItem ItemState.AlreadySent(sentAt)
             }
-            buildAndInstall(local, ::set)
+            deliver(local, ::set)
         }
         set(state)
     }
@@ -613,6 +853,38 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         } finally {
             withContext(NonCancellable + io) { workDir.deleteRecursively() }
         }
+
+    private suspend fun deliver(local: File, set: (ItemState) -> Unit): ItemState =
+        if (_state.value.mode == InstallMode.WIFI) installOnWatch(local, set) else buildAndInstall(local, set)
+
+    /** Wi-Fi mode: the phone talks sdb to the watch and runs `pkgcmd -w` there; the watch answers with the exact outcome. */
+    private suspend fun installOnWatch(local: File, set: (ItemState) -> Unit): ItemState {
+        val address = WatchAddress.parse(_state.value.watchAddress.trim()) ?: error("Invalid watch address")
+        val info = TizenPackageReader.read(local)
+        val type = if (info.kind == TizenPackageKind.TPK) PackageType.TPK else PackageType.WGT
+        val skipRule = if (_state.value.reinstall) null else PackageIdentity(info.packageId, info.version)
+        set(ItemState.Uploading(0))
+        val outcome = deps.watch.install(address, local, type, skipRule) { event ->
+            set(
+                when (event) {
+                    is InstallProgress.Uploading -> ItemState.Uploading(if (event.total > 0) (event.sent * 100 / event.total).toInt() else 100)
+                    is InstallProgress.Installing -> ItemState.InstallingOnWatch(event.percent)
+                },
+            )
+        }
+        return when (outcome) {
+            WatchOutcome.Installed -> {
+                val item = RememberedPackage(info.packageId, info.version, info.displayName, platform.nowMillis())
+                withContext(io) { deps.watchHistory.record(item) }
+                _state.update { it.copy(remembered = it.remembered.filterNot { r -> r.id == item.id } + item) }
+                ItemState.InstalledOnWatch
+            }
+            is WatchOutcome.AlreadyInstalled -> ItemState.AlreadyOnWatch(outcome.version)
+            is WatchOutcome.Refused -> ItemState.WatchRefused(outcome.code, outcome.message)
+            is WatchOutcome.Problem -> ItemState.WatchProblem(outcome.error)
+            WatchOutcome.NoWifi -> ItemState.NoWifi
+        }
+    }
 
     private suspend fun buildAndInstall(local: File, set: (ItemState) -> Unit): ItemState {
         set(ItemState.Building)

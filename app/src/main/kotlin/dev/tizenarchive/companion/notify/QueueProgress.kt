@@ -77,6 +77,9 @@ internal class QueueProgressNotifier(private val context: Context) : QueueProgre
         val detail = when (val s = info.state) {
             is ItemState.Downloading -> context.getString(R.string.state_downloading, s.percent)
             is ItemState.Waiting -> context.getString(R.string.state_waiting, s.secondsLeft)
+            is ItemState.Uploading -> context.getString(R.string.state_uploading, s.percent)
+            is ItemState.InstallingOnWatch ->
+                s.percent?.let { context.getString(R.string.state_watch_installing_percent, it) } ?: context.getString(R.string.state_watch_installing)
             else -> state?.let(context::getString).orEmpty()
         }
         return listOfNotNull(info.name, detail.ifEmpty { null }).joinToString("\n")

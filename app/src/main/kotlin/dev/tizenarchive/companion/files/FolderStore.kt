@@ -7,7 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 
-private val Context.settings by preferencesDataStore(name = "settings")
+internal val Context.settings by preferencesDataStore(name = "settings")
 
 internal interface FolderMemory {
     suspend fun load(): Uri?
