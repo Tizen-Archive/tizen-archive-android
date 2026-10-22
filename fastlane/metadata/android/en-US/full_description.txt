@@ -1,19 +1,22 @@
-Installs Tizen watch packages (.wgt and .tpk) on a Samsung Galaxy Watch or Gear watch through the Galaxy Wearable app, without a computer and without developer mode on the watch.
+Installs Tizen watch packages (.wgt and .tpk) on a Samsung Galaxy Watch or Gear watch, without a computer. There are two ways of sending, chosen with a switch at the top of the screen:
 
-How it works: for every package the app builds a tiny helper app that carries the package, signs it with a key that never leaves your phone and asks Android to install it. Galaxy Wearable notices the helper app and sends the package to the watch over Bluetooth.
+• Galaxy Wearable: no developer mode on the watch. For every package the app builds a tiny helper app that carries the package, signs it with a key that never leaves your phone and asks Android to install it. Galaxy Wearable notices the helper app and sends the package to the watch over Bluetooth.
+• Wi-Fi: faster, and it shows what the watch really answered. The phone talks to the watch over your Wi-Fi network and installs the package with the watch's own package manager. It needs Debugging turned on in the watch's developer options.
 
 Features:
-• Pick a folder (or open or share a .wgt/.tpk from another app), search, select packages and install them in one queue; names, versions and icons are shown and packages already sent are skipped.
+• Pick a folder (or open or share a .wgt/.tpk from another app), search, select packages and install them in one queue; names, versions and icons are shown.
 • Works with the "Install on the watch" button of the Tizen Archive catalog (tizen-archive.com): the package is downloaded and verified (SHA-256 and size) before it is installed.
-• The signing key lives in the Android Keystore; nothing is uploaded anywhere, there are no ads, analytics or trackers.
+• Wi-Fi: "Find the watch" looks for the watch in your network, so no other app is needed to learn its IP address. The queue shows sending and installation progress and the exact answer of the watch if it refuses a package. A version the watch already has is skipped.
+• Wi-Fi: the "On the watch" tab lists the packages the watch reports, with search, and removes the ones this app installed.
+• The keys live in the Android Keystore; nothing is uploaded anywhere, there are no ads, analytics or trackers.
 
 Requirements:
-• Android 8.0 or newer with Galaxy Wearable and Samsung's Gear Plugin installed, and a watch connected over Bluetooth.
-• Permission to install apps from this app (Android asks for it once).
-• The package must be accepted by the watch: a .tpk has to be signed with a certificate the watch trusts. The app cannot check this; if the watch refuses a package, Galaxy Wearable shows an error.
+• Android 8.0 or newer.
+• The package must be accepted by the watch: a .tpk has to be signed with a certificate the watch trusts. The app only predicts this; if the watch refuses a package, you see its answer (Wi-Fi) or an error in Galaxy Wearable.
+• Galaxy Wearable: the Galaxy Wearable app with Samsung's Gear Plugin, a watch connected over Bluetooth and permission to install apps from this app (Android asks once).
+• Wi-Fi: Debugging on in the watch's developer options, the watch on the same Wi-Fi network as the phone (not a guest network), on Android 17 the permission to use the local network, no other sdb tool connected to the watch and no VPN running on the phone.
 
 Good to know:
-• Android asks you to confirm the installation of every helper app.
-• Galaxy Wearable handles one package at a time, so the app waits between installations; a large package can take minutes over Bluetooth.
-• The "On the watch" tab lists the apps this phone sent to the watch and can remove their helper apps. Removing a helper app asks Galaxy Wearable to remove the app from the watch too, but it does not always do it: check the app list in Galaxy Wearable.
-• The app only talks to the network when you open an install link from the Tizen Archive website or tap "Check for updates".
+• Galaxy Wearable: Android asks you to confirm the installation of every helper app; Galaxy Wearable handles one package at a time, so the app waits between installations, and a large package can take minutes over Bluetooth. Removing a helper app asks Galaxy Wearable to remove the app from the watch too, but it does not always do it: check the app list in Galaxy Wearable.
+• Wi-Fi: the watch asks once to allow the phone. Removing a package also deletes its data on the watch.
+• The app talks to the internet only when you open an install link from the Tizen Archive website or tap "Check for updates". The Wi-Fi way connects only to the watch in your local network.

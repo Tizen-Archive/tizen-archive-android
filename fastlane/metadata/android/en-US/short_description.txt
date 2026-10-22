@@ -1,1 +1,1 @@
-Install Tizen watch apps and watch faces on Samsung watches via Galaxy Wearable
+Install Tizen watch apps on Samsung watches over Wi-Fi or via Galaxy Wearable
