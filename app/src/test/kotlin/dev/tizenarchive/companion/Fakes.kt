@@ -19,7 +19,21 @@ import dev.tizenarchive.companion.install.UninstallOutcome
 import dev.tizenarchive.companion.notify.ProgressInfo
 import dev.tizenarchive.companion.notify.QueueNotifications
 import dev.tizenarchive.companion.notify.QueueProgress
+import dev.tizenarchive.companion.sdb.InstallProgress
+import dev.tizenarchive.companion.sdb.PackageType
 import dev.tizenarchive.companion.tizen.TizenPackageReader
+import dev.tizenarchive.companion.catalog.VersionCompare
+import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.wifi.FindOutcome
+import dev.tizenarchive.companion.wifi.PackageIdentity
+import dev.tizenarchive.companion.wifi.RememberedPackage
+import dev.tizenarchive.companion.wifi.WatchHistoryMemory
+import dev.tizenarchive.companion.wifi.WatchListOutcome
+import dev.tizenarchive.companion.wifi.WatchRemoveOutcome
+import dev.tizenarchive.companion.wifi.WatchGateway
+import dev.tizenarchive.companion.wifi.WatchOutcome
+import dev.tizenarchive.companion.wifi.WatchSettings
+import dev.tizenarchive.companion.wifi.WatchSettingsMemory
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -53,6 +67,7 @@ internal class FakePlatform(
     val clock: () -> Long,
 ) : Platform {
     var canInstall = true
+    var localNetwork = true
     val installedPackages = mutableSetOf(
         "com.samsung.android.app.watchmanager",
         "com.samsung.android.geargplugin",
@@ -62,9 +77,15 @@ internal class FakePlatform(
 
     override fun canRequestPackageInstalls() = canInstall
 
+    override fun hasLocalNetworkAccess() = localNetwork
+
     override fun isInstalled(packageName: String) = packageName in installedPackages
 
     override fun elapsedRealtime() = clock()
+
+    var now = 1_700_000_000_000L
+
+    override fun nowMillis() = now
 
     override fun openInput(uri: Uri): InputStream? =
         if (uri.scheme == "file") File(uri.path!!).inputStream() else contents[uri]?.inputStream()
@@ -174,5 +195,86 @@ internal class FakeProgress : QueueProgress {
 
     override fun stop() {
         stops++
+    }
+}
+
+internal class FakeWatch : WatchGateway {
+    class Call(val address: String, val type: PackageType, val name: String, val skipRule: PackageIdentity?)
+
+    val calls = mutableListOf<Call>()
+    val outcomes = ArrayDeque<WatchOutcome>()
+
+    /** Reported to the queue before the outcome, in order. */
+    var events: List<InstallProgress> = listOf(InstallProgress.Uploading(5, 10), InstallProgress.Uploading(10, 10), InstallProgress.Installing(null), InstallProgress.Installing(60))
+    var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    var found: FindOutcome = FindOutcome.Found(emptyList())
+    var findGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    var findFailure: Exception? = null
+    var finds = 0
+
+    override suspend fun find(): FindOutcome {
+        finds++
+        findGate?.await()
+        findFailure?.let { throw it }
+        return found
+    }
+
+    /** What the watch already has, by package id; consulted when an install carries a skip rule. */
+    val installed = mutableMapOf<String, String>()
+    var listed: WatchListOutcome = WatchListOutcome.Listed(emptyList())
+    var listGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    var listFailure: Exception? = null
+    var lists = 0
+    var removeOutcome: WatchRemoveOutcome = WatchRemoveOutcome.Removed
+    var removeGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    val removed = mutableListOf<String>()
+
+    override suspend fun list(address: java.net.InetAddress): WatchListOutcome {
+        lists++
+        listGate?.await()
+        listFailure?.let { throw it }
+        return listed
+    }
+
+    override suspend fun remove(address: java.net.InetAddress, packageId: String): WatchRemoveOutcome {
+        removed += packageId
+        removeGate?.await()
+        return removeOutcome
+    }
+
+    override suspend fun install(
+        address: java.net.InetAddress,
+        file: File,
+        type: PackageType,
+        skipIfInstalled: PackageIdentity?,
+        progress: (InstallProgress) -> Unit,
+    ): WatchOutcome {
+        calls += Call(address.hostAddress.orEmpty(), type, file.name, skipIfInstalled)
+        val there = skipIfInstalled?.let { installed[it.id] }
+        val wanted = skipIfInstalled?.version
+        if (there != null && wanted != null && VersionCompare.compare(there, wanted) >= 0) return WatchOutcome.AlreadyInstalled(there)
+        events.forEach(progress)
+        gate?.await()
+        return outcomes.removeFirstOrNull() ?: WatchOutcome.Installed
+    }
+}
+
+internal class FakeWatchSettings(var saved: WatchSettings = WatchSettings()) : WatchSettingsMemory {
+    override suspend fun load() = saved
+
+    override suspend fun save(settings: WatchSettings) {
+        saved = settings
+    }
+}
+
+internal class FakeWatchHistory(var items: List<RememberedPackage> = emptyList()) : WatchHistoryMemory {
+    override suspend fun load() = items
+
+    override suspend fun record(item: RememberedPackage) {
+        items = items.filterNot { it.id == item.id } + item
+    }
+
+    override suspend fun forget(packageId: String) {
+        items = items.filterNot { it.id == packageId }
     }
 }
