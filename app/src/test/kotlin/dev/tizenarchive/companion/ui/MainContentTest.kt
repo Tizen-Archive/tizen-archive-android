@@ -358,6 +358,14 @@ class MainContentTest {
     }
 
     @Test
+    fun `a search shows how many of the packages match`() {
+        show(UiState(mode = InstallMode.WIFI, watchQuery = "light", watchList = WatchListState.Loaded(listOf(wp("a", "White Light"), wp("b", "Clock"), wp("c", "Flash light")))))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.watch_wifi_shown, 2, 3)).assertExists()
+        compose.onAllNodesWithText(str(R.string.watch_wifi_count, 3)).assertCountEquals(0)
+    }
+
+    @Test
     fun `a failing list explains itself`() {
         show(UiState(mode = InstallMode.WIFI, watchList = WatchListState.Problem(SdbError.BUSY)))
         compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
