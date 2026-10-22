@@ -88,6 +88,11 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import kotlin.math.roundToInt
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -177,7 +182,8 @@ internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () 
         modifier = Modifier.nestedScroll(headerScroll.nestedScrollConnection),
         topBar = {
             // No title bar: the screen is small and the launcher already shows the name. Everything keeps clear of the status bar.
-            Column(modifier = Modifier.statusBarsPadding()) {
+            // In landscape the navigation bar sits at the side: the header keeps clear of it too
+            Column(modifier = Modifier.statusBarsPadding().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
                 CollapsingHeader(headerScroll.state) { SendHeader(state, actions) }
                 PrimaryTabRow(selectedTabIndex = tab) {
                     // The chosen tab is also bold: with the system's dynamic colours the two label colours can be close

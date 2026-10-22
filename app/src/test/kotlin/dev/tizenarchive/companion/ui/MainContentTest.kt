@@ -533,4 +533,24 @@ class MainContentTest {
         // Missing Galaxy Wearable does not matter in Wi-Fi mode
         assertEquals(Readiness.READY, sendReadiness(UiState(mode = InstallMode.WIFI, watchAddress = "10.0.0.1", missing = setOf(Missing.GALAXY_WEARABLE))))
     }
+
+    @Test
+    @Config(qualifiers = "w800dp-h360dp-land")
+    fun `in landscape the switch and the status share a row and the caption is not drawn`() {
+        show(UiState(mode = InstallMode.WIFI, watchAddress = "192.168.0.20"))
+        compose.onNodeWithText(str(R.string.mode_wifi)).assertExists()
+        compose.onNodeWithText(str(R.string.mode_companion)).assertExists()
+        compose.onNodeWithText(str(R.string.status_wifi_ready, "192.168.0.20")).assertExists()
+        compose.onAllNodesWithText(str(R.string.send_caption)).assertCountEquals(0)
+        compose.onNodeWithText(str(R.string.mode_companion)).performClick()
+        assertEquals(listOf("setMode COMPANION"), actions.calls)
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h360dp-land")
+    fun `in landscape the setup opens from the status row`() {
+        show(UiState(mode = InstallMode.WIFI, watchAddress = "192.168.0.20"))
+        toggleSetup()
+        compose.onNodeWithText(str(R.string.mode_wifi_hint)).assertExists()
+    }
 }
