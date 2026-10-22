@@ -91,6 +91,8 @@ Wi-Fi way:
 - The address of the watch can change (the router hands out addresses); if the watch is not found at the saved address,
   press **Find the watch** again.
 - Removing a package from the "On the watch" tab also deletes its data on the watch.
+- Not tested: a watch connected to the phone's own hotspot. "Find the watch" may not see it there (the search uses the
+  phone's Wi-Fi network); type the watch's address by hand.
 - Not supported: `sdb` over Bluetooth. The watches' sdb daemon closes such connections at once (checked on SM-R800), so
   the app uses Wi-Fi.
 
