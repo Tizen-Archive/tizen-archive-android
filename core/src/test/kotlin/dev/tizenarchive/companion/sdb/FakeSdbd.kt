@@ -41,6 +41,14 @@ class FakeSdbd(val maxData: Int = 262_144) : AutoCloseable {
 
     @Volatile var sendGarbage = false
 
+    /** Largest WRTE payload of a LIST or RECV reply, so that sync messages get split across packets. */
+    val syncChunk = AtomicInteger(Int.MAX_VALUE)
+
+    /** Acknowledges a LIST or RECV request only after its reply. */
+    @Volatile var lateAck = false
+
+    val pulls = CopyOnWriteArrayList<String>()
+
     val confirmations = AtomicInteger()
     val shells = ConcurrentHashMap<String, String>()
     val shellChunk = AtomicInteger(Int.MAX_VALUE)
@@ -154,11 +162,45 @@ class FakeSdbd(val maxData: Int = 262_144) : AutoCloseable {
                     }
                 }
                 SdbPacket.WRTE -> {
-                    send(SdbPacket.OKAY, packet.arg1, packet.arg0, ByteArray(0))
-                    writeSizes += packet.data.size
                     val id = String(packet.data, 0, 4)
                     val length = ByteBuffer.wrap(packet.data, 4, 4).order(ByteOrder.LITTLE_ENDIAN).getInt()
+                    val delayAck = lateAck && (id == "LIST" || id == "RECV")
+                    if (!delayAck) send(SdbPacket.OKAY, packet.arg1, packet.arg0, ByteArray(0))
+                    writeSizes += packet.data.size
+                    fun reply(bytes: ByteArray) {
+                        var offset = 0
+                        while (offset < bytes.size) {
+                            val n = minOf(syncChunk.get(), bytes.size - offset)
+                            send(SdbPacket.WRTE, syncRemote, syncLocal, bytes.copyOfRange(offset, offset + n))
+                            offset += n
+                        }
+                        if (delayAck) send(SdbPacket.OKAY, packet.arg1, packet.arg0, ByteArray(0))
+                    }
                     when (id) {
+                        "LIST" -> {
+                            val dir = String(packet.data, 8, length)
+                            val out = ByteArrayOutputStream()
+                            out.write(dent("DENT", 0x41ed, 4096, "."))
+                            files.filterKeys { it.substringBeforeLast('/') == dir }.forEach { (path, bytes) ->
+                                out.write(dent("DENT", 0x81a4, bytes.size, path.substringAfterLast('/')))
+                            }
+                            out.write(dent("DONE", 0, 0, ""))
+                            reply(out.toByteArray())
+                        }
+                        "RECV" -> {
+                            val path = String(packet.data, 8, length)
+                            pulls += path
+                            val bytes = files[path]
+                            if (bytes == null) {
+                                reply(syncMessage("FAIL", "No such file".toByteArray()))
+                                send(SdbPacket.CLSE, syncRemote, syncLocal, ByteArray(0))
+                            } else {
+                                val out = ByteArrayOutputStream()
+                                bytes.asList().chunked(65_536).forEach { out.write(syncMessage("DATA", it.toByteArray())) }
+                                out.write(syncMessage("DONE", ByteArray(0)))
+                                reply(out.toByteArray())
+                            }
+                        }
                         "SEND" -> {
                             val target = String(packet.data, 8, length)
                             syncPath = target.substringBeforeLast(',')
@@ -178,6 +220,15 @@ class FakeSdbd(val maxData: Int = 262_144) : AutoCloseable {
             }
         }
     }
+
+    private fun dent(tag: String, mode: Int, size: Int, name: String): ByteArray {
+        val bytes = name.toByteArray()
+        return ByteBuffer.allocate(20 + bytes.size).order(ByteOrder.LITTLE_ENDIAN)
+            .put(tag.toByteArray()).putInt(mode).putInt(size).putInt(1_793_000_000).putInt(bytes.size).put(bytes).array()
+    }
+
+    private fun syncMessage(tag: String, payload: ByteArray): ByteArray =
+        ByteBuffer.allocate(8 + payload.size).order(ByteOrder.LITTLE_ENDIAN).put(tag.toByteArray()).putInt(payload.size).put(payload).array()
 
     private fun verify(key: java.security.PublicKey, token: ByteArray, signature: ByteArray): Boolean {
         val prefix = byteArrayOf(0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14)

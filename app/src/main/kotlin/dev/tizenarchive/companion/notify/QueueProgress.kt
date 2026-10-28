@@ -25,6 +25,9 @@ internal interface QueueProgress {
 
     fun update(info: ProgressInfo)
 
+    /** Capturing deliveries runs in the background like a queue; [saved] packages are in the folder so far. */
+    fun capturing(saved: Int)
+
     fun stop()
 }
 
@@ -47,7 +50,23 @@ internal class QueueProgressNotifier(private val context: Context) : QueueProgre
         if (running && text == lastText || running && now - lastAt < MIN_INTERVAL_MS && info.state is ItemState.Waiting) return
         lastText = text
         lastAt = now
-        val notification = build(info, text)
+        val title = if (info.total > 1) {
+            context.getString(R.string.notification_progress_many, info.index, info.total)
+        } else {
+            context.getString(R.string.notification_progress)
+        }
+        show(build(title, text, context.getString(R.string.cancel)))
+    }
+
+    @Synchronized
+    override fun capturing(saved: Int) {
+        val text = context.resources.getQuantityString(R.plurals.capture_notification_saved, saved, saved)
+        if (running && text == lastText) return
+        lastText = text
+        show(build(context.getString(R.string.capture_notification_title), text, context.getString(R.string.capture_stop)))
+    }
+
+    private fun show(notification: Notification) {
         if (!running) {
             running = true
             QueueService.initial = notification
@@ -85,7 +104,7 @@ internal class QueueProgressNotifier(private val context: Context) : QueueProgre
         return listOfNotNull(info.name, detail.ifEmpty { null }).joinToString("\n")
     }
 
-    private fun build(info: ProgressInfo, text: String): Notification {
+    private fun build(title: String, text: String, cancelLabel: String): Notification {
         Notifications.ensureChannels(context)
         val open = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -95,11 +114,6 @@ internal class QueueProgressNotifier(private val context: Context) : QueueProgre
             context, 1, Intent(context, QueueService::class.java).setAction(QueueService.ACTION_CANCEL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val title = if (info.total > 1) {
-            context.getString(R.string.notification_progress_many, info.index, info.total)
-        } else {
-            context.getString(R.string.notification_progress)
-        }
         return NotificationCompat.Builder(context, Notifications.PROGRESS_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_watch)
             .setContentTitle(title)
@@ -109,7 +123,7 @@ internal class QueueProgressNotifier(private val context: Context) : QueueProgre
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .addAction(0, context.getString(R.string.cancel), cancel)
+            .addAction(0, cancelLabel, cancel)
             .build()
     }
 

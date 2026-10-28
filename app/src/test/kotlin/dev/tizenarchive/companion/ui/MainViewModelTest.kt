@@ -17,6 +17,8 @@ import dev.tizenarchive.companion.FakeWatchHistory
 import dev.tizenarchive.companion.FakeWatchSettings
 import dev.tizenarchive.companion.apk.CompanionApk
 import dev.tizenarchive.companion.build.DeliveryPacing
+import dev.tizenarchive.companion.capture.CaptureResult
+import dev.tizenarchive.companion.capture.Delivery
 import dev.tizenarchive.companion.catalog.Artifact
 import dev.tizenarchive.companion.catalog.Build
 import dev.tizenarchive.companion.catalog.Verdict
@@ -29,7 +31,10 @@ import dev.tizenarchive.companion.sdb.InstallProgress
 import dev.tizenarchive.companion.sdb.PackageType
 import dev.tizenarchive.companion.sdb.SdbError
 import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.tizen.TizenPackageInfo
+import dev.tizenarchive.companion.tizen.TizenPackageKind
 import dev.tizenarchive.companion.tizenPackage
+import dev.tizenarchive.companion.wifi.CaptureEvent
 import dev.tizenarchive.companion.wifi.FindOutcome
 import dev.tizenarchive.companion.wifi.InstallMode
 import dev.tizenarchive.companion.wifi.RememberedPackage
@@ -1011,5 +1016,154 @@ class MainViewModelTest {
         watch.removeGate!!.complete(Unit)
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(listOf("com.mine"), watch.removed)
+    }
+
+    // ---- Capturing deliveries ----------------------------------------------------------------------------
+
+    private fun captured(id: String, version: String, signed: Boolean = true): CaptureEvent.Result {
+        val file = tmp.newFile().apply { writeBytes(tizenPackage(id, version)) }
+        return CaptureEvent.Result(CaptureResult.Captured(file, TizenPackageInfo(TizenPackageKind.TPK, id, version, "App $id"), signed))
+    }
+
+    @Test
+    fun `capture saves delivered packages into the folder and reports each`() {
+        val first = captured("com.a", "1.0")
+        watch.captureEvents = listOf(
+            CaptureEvent.Watching,
+            CaptureEvent.Receiving(listOf(Delivery("tizenapp_1_samsungapps-2-30-4.wgt", 10, 30))),
+            first,
+            captured("com.b", "2.0", signed = false),
+            CaptureEvent.Result(CaptureResult.Missed("watcher.tpk")),
+            CaptureEvent.Result(CaptureResult.Invalid("watcher.wgt")),
+        )
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val capture = vm.state.value.capture
+        assertTrue(capture.running)
+        assertEquals(CaptureStatus.Watching, capture.status)
+        assertEquals(1, capture.receiving.size)
+        assertEquals(
+            listOf(
+                CaptureOutcome.INVALID to "watcher.wgt",
+                CaptureOutcome.MISSED to "watcher.tpk",
+                CaptureOutcome.SAVED_UNSIGNED to "com.b-2.0.tpk",
+                CaptureOutcome.SAVED to "com.a-1.0.tpk",
+            ),
+            capture.items.map { it.outcome to it.fileName },
+        )
+        assertEquals(setOf("com.a-1.0.tpk", "com.b-2.0.tpk"), platform.savedFiles.keys)
+        assertEquals(listOf(0, 1, 2), progress.captures)
+        // The copies in the cache are gone once saved
+        assertTrue(!(first.result as CaptureResult.Captured).file.exists())
+
+        vm.stopCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(watch.captureStopped)
+        assertTrue(!vm.state.value.capture.running)
+        assertEquals(4, vm.state.value.capture.items.size)
+        assertEquals(1, progress.stops)
+    }
+
+    @Test
+    fun `a package already in the folder is not saved twice`() {
+        addFile("com.a-1.0.tpk", "com.a", "1.0")
+        watch.captureEvents = listOf(captured("com.a", "1.0"), captured("com.b", "1.0"), captured("com.b", "1.0"))
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(
+            listOf(CaptureOutcome.ALREADY_THERE, CaptureOutcome.SAVED, CaptureOutcome.ALREADY_THERE),
+            vm.state.value.capture.items.reversed().map { it.outcome },
+        )
+        assertEquals(setOf("com.b-1.0.tpk"), platform.savedFiles.keys)
+    }
+
+    @Test
+    fun `a folder the app may not write to is reported`() {
+        platform.writable = false
+        watch.captureEvents = listOf(captured("com.a", "1.0"))
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(CaptureOutcome.NOT_SAVED, vm.state.value.capture.items.single().outcome)
+        assertEquals(CaptureHint.NO_WRITE_ACCESS, vm.state.value.capture.hint)
+    }
+
+    @Test
+    fun `capture needs a folder, the permission and a valid address`() {
+        val noFolder = viewModel(folder = null)
+        dispatcher.scheduler.advanceUntilIdle()
+        noFolder.wifi()
+        noFolder.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(CaptureHint.NO_FOLDER, noFolder.state.value.capture.hint)
+        assertTrue(!noFolder.state.value.capture.running)
+
+        platform.localNetwork = false
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        assertEquals(CaptureHint.NO_PERMISSION, vm.state.value.capture.hint)
+
+        platform.localNetwork = true
+        vm.setWatchAddress("not an address")
+        vm.startCapture()
+        assertTrue(vm.state.value.watchAddressInvalid)
+
+        // Not in companion mode either
+        vm.setMode(InstallMode.COMPANION)
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, watch.captures)
+    }
+
+    @Test
+    fun `whatever else needs the watch stops the capture first`() {
+        val a = addFile("a.wgt", "com.a", "1.0")
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        // The list of the watch is not asked while the capture holds the connection
+        vm.refreshWatchList()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, watch.lists)
+
+        vm.toggle(a.uri)
+        vm.installSelected()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(watch.captureStopped)
+        assertEquals(ItemState.InstalledOnWatch, vm.state.value.states[a.uri])
+
+        watch.captureStopped = false
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.setMode(InstallMode.COMPANION)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(watch.captureStopped)
+        assertEquals(2, watch.captures)
+    }
+
+    @Test
+    fun `cancelling from the notification stops the capture`() {
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+        progress.onCancel!!.invoke()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(watch.captureStopped)
+        assertTrue(!vm.state.value.capture.running)
     }
 }

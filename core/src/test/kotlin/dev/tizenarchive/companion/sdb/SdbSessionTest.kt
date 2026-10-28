@@ -1,6 +1,7 @@
 package dev.tizenarchive.companion.sdb
 
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -9,6 +10,7 @@ import java.security.interfaces.RSAPublicKey
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -142,6 +144,77 @@ class SdbSessionTest {
             }
         }
         assertTrue(watch.files.isEmpty())
+    }
+
+    @Test
+    fun `list returns the files of a directory from messages split across packets`() {
+        val watch = watch().also {
+            it.files["/data/a.wgt"] = ByteArray(1_234)
+            it.files["/data/b.tpk"] = ByteArray(7)
+            it.files["/other/c.wgt"] = ByteArray(1)
+            it.syncChunk.set(3)
+        }
+        connect(watch).use { session ->
+            val entries = session.list("/data").sortedBy { it.name }
+            assertEquals(listOf("a.wgt" to 1_234L, "b.tpk" to 7L), entries.map { it.name to it.size })
+            assertTrue(entries.all { it.isFile })
+            assertEquals(1_793_000_000L, entries.first().modifiedAt)
+        }
+    }
+
+    @Test
+    fun `a missing directory lists as empty`() {
+        connect(watch()).use { assertTrue(it.list("/nowhere").isEmpty()) }
+    }
+
+    @Test
+    fun `pull copies a file whatever the packet boundaries and acknowledgement order`() {
+        val content = ByteArray(200_000) { (it * 31).toByte() }
+        val watch = watch().also {
+            it.files["/data/p.wgt"] = content
+            it.syncChunk.set(5_000)
+            it.lateAck = true
+            it.shells["echo ok"] = "ok\n"
+        }
+        connect(watch).use { session ->
+            val out = ByteArrayOutputStream()
+            assertTrue(session.pull("/data/p.wgt", out, content.size.toLong()))
+            assertArrayEquals(content, out.toByteArray())
+            // The session goes on after the file service
+            assertEquals(listOf("p.wgt"), session.list("/data").map { it.name })
+            assertEquals("ok\n", session.shell("echo ok"))
+        }
+    }
+
+    @Test
+    fun `pulling a file that is gone answers false and the session goes on`() {
+        val watch = watch().also { it.files["/data/x.wgt"] = ByteArray(3) }
+        connect(watch).use { session ->
+            assertFalse(session.pull("/data/gone.wgt", ByteArrayOutputStream(), 100))
+            val out = ByteArrayOutputStream()
+            assertTrue(session.pull("/data/x.wgt", out, 100))
+            assertEquals(3, out.size())
+        }
+    }
+
+    @Test
+    fun `a file larger than allowed is a protocol error`() {
+        val watch = watch().also { it.files["/data/big.wgt"] = ByteArray(100_000) }
+        connect(watch).use { session ->
+            assertEquals(SdbError.PROTOCOL, errorOf { session.pull("/data/big.wgt", ByteArrayOutputStream(), 99_999) })
+        }
+    }
+
+    @Test
+    fun `list and pull refuse odd paths before anything is sent`() {
+        val watch = watch()
+        connect(watch).use { session ->
+            for (path in listOf("relative", "/tmp/a b", "/tmp/a;rm", "")) {
+                assertThrows(IllegalArgumentException::class.java, { session.list(path) }, path)
+                assertThrows(IllegalArgumentException::class.java, { session.pull(path, ByteArrayOutputStream(), 1) }, path)
+            }
+        }
+        assertTrue(watch.pulls.isEmpty())
     }
 
     @Test

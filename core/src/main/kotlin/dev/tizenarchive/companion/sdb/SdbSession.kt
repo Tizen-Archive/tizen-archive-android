@@ -77,10 +77,126 @@ public class SdbSession private constructor(
             if (String(reply.data, 0, minOf(4, reply.data.size), Charsets.US_ASCII) != "OKAY") {
                 throw SdbException(SdbError.PROTOCOL, "The watch refused the file: " + String(reply.data, Charsets.UTF_8).trim())
             }
-            writeRaw(id, syncCommand("QUIT", 0, ByteArray(0)), waitForAck = false)
-            // The service closes itself; whatever it still sends is skipped by local id in the next call.
+            quit(id)
         } catch (e: IOException) {
             throw translate(e)
+        }
+    }
+
+    override fun list(remoteDir: String): List<RemoteEntry> {
+        require(REMOTE_PATH.matches(remoteDir)) { "Unsupported remote path" }
+        val id = open("sync:")
+        try {
+            val reader = SyncReader(id)
+            reader.request("LIST", remoteDir.toByteArray(Charsets.UTF_8))
+            val entries = mutableListOf<RemoteEntry>()
+            while (true) {
+                // DONE carries the same four fields as DENT, all zero
+                val head = ByteBuffer.wrap(reader.read(SYNC_HEADER + 12)).order(ByteOrder.LITTLE_ENDIAN)
+                val tag = ByteArray(4).also(head::get).toString(Charsets.US_ASCII)
+                val mode = head.getInt()
+                val size = head.getInt().toUInt().toLong()
+                val time = head.getInt().toUInt().toLong()
+                val nameLength = head.getInt()
+                if (tag == "DONE") break
+                if (tag != "DENT" || nameLength !in 1..MAX_NAME) throw SdbException(SdbError.PROTOCOL, "Unexpected directory listing")
+                val name = reader.read(nameLength).toString(Charsets.UTF_8)
+                if (name != "." && name != "..") entries += RemoteEntry(name, size, mode, time)
+                if (entries.size > MAX_ENTRIES) throw SdbException(SdbError.PROTOCOL, "The directory is too large")
+            }
+            reader.awaitAck()
+            quit(id)
+            return entries
+        } catch (e: IOException) {
+            throw translate(e)
+        }
+    }
+
+    override fun pull(remotePath: String, out: OutputStream, maxBytes: Long): Boolean {
+        require(REMOTE_PATH.matches(remotePath)) { "Unsupported remote path" }
+        val id = open("sync:")
+        try {
+            val reader = SyncReader(id)
+            reader.request("RECV", remotePath.toByteArray(Charsets.UTF_8))
+            var received = 0L
+            while (true) {
+                val head = ByteBuffer.wrap(reader.read(SYNC_HEADER)).order(ByteOrder.LITTLE_ENDIAN)
+                val tag = ByteArray(4).also(head::get).toString(Charsets.US_ASCII)
+                val length = head.getInt()
+                when (tag) {
+                    "DATA" -> {
+                        if (length !in 0..MAX_PACKET) throw SdbException(SdbError.PROTOCOL, "Unexpected file data")
+                        received += length
+                        if (received > maxBytes) throw SdbException(SdbError.PROTOCOL, "The file is larger than allowed")
+                        out.write(reader.read(length))
+                    }
+                    "DONE" -> break
+                    "FAIL" -> {
+                        // The watch ends the file service after a failure, so there is nothing to quit
+                        if (length in 0..MAX_NAME) reader.read(length)
+                        return false
+                    }
+                    else -> throw SdbException(SdbError.PROTOCOL, "Unexpected file transfer")
+                }
+            }
+            reader.awaitAck()
+            quit(id)
+            return true
+        } catch (e: IOException) {
+            throw translate(e)
+        }
+    }
+
+    /** Ends a file service; it closes itself, and whatever it still sends is skipped by local id in the next call. */
+    private fun quit(id: Stream) = writeRaw(id, syncCommand("QUIT", 0, ByteArray(0)), waitForAck = false)
+
+    /**
+     * Reads the replies of a file service. They arrive in WRTE packets whose boundaries need not match the messages, and the
+     * acknowledgement of the request may come before or after them.
+     */
+    private inner class SyncReader(private val id: Stream) {
+        private var buffer = ByteArray(0)
+        private var offset = 0
+        private var acknowledged = false
+
+        fun request(command: String, payload: ByteArray) = writeRaw(id, syncCommand(command, payload.size, payload), waitForAck = false)
+
+        fun read(count: Int): ByteArray {
+            val result = ByteArray(count)
+            var filled = 0
+            while (filled < count) {
+                if (offset == buffer.size) receive(dataWanted = true)
+                val n = minOf(count - filled, buffer.size - offset)
+                System.arraycopy(buffer, offset, result, filled, n)
+                offset += n
+                filled += n
+            }
+            return result
+        }
+
+        /** Another request may only be written after the watch acknowledged the previous one. */
+        fun awaitAck() {
+            while (!acknowledged) receive(dataWanted = false)
+        }
+
+        private fun receive(dataWanted: Boolean) {
+            while (true) {
+                val packet = next(id.local) ?: continue
+                when (packet.command) {
+                    SdbPacket.OKAY -> {
+                        acknowledged = true
+                        if (!dataWanted) return
+                    }
+                    SdbPacket.WRTE -> {
+                        send(SdbPacket.OKAY, id.local, id.remote)
+                        if (!dataWanted) throw SdbException(SdbError.PROTOCOL, "Unexpected data from the watch")
+                        buffer = packet.data
+                        offset = 0
+                        if (buffer.isNotEmpty()) return
+                    }
+                    SdbPacket.CLSE -> throw SdbException(SdbError.DISCONNECTED, "The watch closed the file service")
+                }
+            }
         }
     }
 
@@ -148,6 +264,8 @@ public class SdbSession private constructor(
         private const val MAX_CHUNK = 64 * 1024
         private const val SYNC_HEADER = 8
         private const val MAX_SHELL_OUTPUT = 4 shl 20
+        private const val MAX_NAME = 1024
+        private const val MAX_ENTRIES = 10_000
         private const val HOST_VERSION = 0x01000000
         private const val HOST_MAX_DATA = 0x40000
         private const val AUTH_TOKEN = 1

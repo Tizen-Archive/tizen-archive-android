@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import dev.tizenarchive.companion.build.CompanionBuilder
 import dev.tizenarchive.companion.build.CompanionFactory
@@ -38,6 +39,7 @@ import dev.tizenarchive.companion.wifi.WatchSettingsMemory
 import dev.tizenarchive.companion.wifi.WatchSettingsStore
 import dev.tizenarchive.companion.wifi.WifiWatchGateway
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +69,12 @@ internal interface Platform {
     fun displayName(uri: Uri): String?
 
     fun takeReadPermission(uri: Uri)
+
+    /** Keeps access to a chosen folder across restarts: writing too when the picker granted it. */
+    fun takeFolderPermission(tree: Uri)
+
+    /** Copies [file] into the folder [tree] under [name]; false when the app may not write there. */
+    fun saveToFolder(tree: Uri, name: String, file: File): Boolean
 }
 
 internal class AndroidPlatform(private val context: Context) : Platform {
@@ -95,6 +103,30 @@ internal class AndroidPlatform(private val context: Context) : Platform {
 
     override fun takeReadPermission(uri: Uri) {
         runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+    }
+
+    override fun takeFolderPermission(tree: Uri) {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }.onFailure { takeReadPermission(tree) }
+    }
+
+    override fun saveToFolder(tree: Uri, name: String, file: File): Boolean {
+        val resolver = context.contentResolver
+        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val target = try {
+            DocumentsContract.createDocument(resolver, parent, "application/octet-stream", name)
+        } catch (e: SecurityException) {
+            null
+        } ?: return false
+        try {
+            resolver.openOutputStream(target)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: throw IOException("No output stream")
+        } catch (e: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, target) }
+            if (e is SecurityException) return false
+            throw e
+        }
+        return true
     }
 }
 

@@ -24,6 +24,7 @@ import dev.tizenarchive.companion.sdb.PackageType
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import dev.tizenarchive.companion.catalog.VersionCompare
 import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.wifi.CaptureEvent
 import dev.tizenarchive.companion.wifi.FindOutcome
 import dev.tizenarchive.companion.wifi.PackageIdentity
 import dev.tizenarchive.companion.wifi.RememberedPackage
@@ -93,6 +94,17 @@ internal class FakePlatform(
     override fun displayName(uri: Uri): String? = names[uri]
 
     override fun takeReadPermission(uri: Uri) = Unit
+
+    var writable = true
+    val savedFiles = mutableMapOf<String, ByteArray>()
+
+    override fun takeFolderPermission(tree: Uri) = Unit
+
+    override fun saveToFolder(tree: Uri, name: String, file: File): Boolean {
+        if (!writable) return false
+        savedFiles[name] = file.readBytes()
+        return true
+    }
 }
 
 internal class FakeFolders(var saved: Uri? = null) : FolderMemory {
@@ -193,6 +205,12 @@ internal class FakeProgress : QueueProgress {
         updates += info
     }
 
+    val captures = mutableListOf<Int>()
+
+    override fun capturing(saved: Int) {
+        captures += saved
+    }
+
     override fun stop() {
         stops++
     }
@@ -234,6 +252,21 @@ internal class FakeWatch : WatchGateway {
         listGate?.await()
         listFailure?.let { throw it }
         return listed
+    }
+
+    /** Sent to a capture in order; each [CaptureEvent.Result] gets a file in the work directory. Then the capture waits to be stopped. */
+    var captureEvents: List<CaptureEvent> = emptyList()
+    var captures = 0
+    var captureStopped = false
+
+    override suspend fun capture(address: java.net.InetAddress, workDir: File, onEvent: suspend (CaptureEvent) -> Unit) {
+        captures++
+        try {
+            captureEvents.forEach { onEvent(it) }
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            captureStopped = true
+        }
     }
 
     override suspend fun remove(address: java.net.InetAddress, packageId: String): WatchRemoveOutcome {
