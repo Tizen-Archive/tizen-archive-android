@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import dev.tizenarchive.companion.Dependencies
 import dev.tizenarchive.companion.apk.CompanionApk
 import dev.tizenarchive.companion.build.DeliveryPacing
+import dev.tizenarchive.companion.capture.CaptureResult
+import dev.tizenarchive.companion.capture.Delivery
 import dev.tizenarchive.companion.catalog.Artifact
 import dev.tizenarchive.companion.catalog.ArtifactSelection
 import dev.tizenarchive.companion.catalog.CatalogError
@@ -30,6 +32,7 @@ import dev.tizenarchive.companion.sdb.WatchPackage
 import dev.tizenarchive.companion.sdb.WatchAddress
 import dev.tizenarchive.companion.tizen.TizenPackageKind
 import dev.tizenarchive.companion.tizen.TizenPackageReader
+import dev.tizenarchive.companion.wifi.CaptureEvent
 import dev.tizenarchive.companion.wifi.FindOutcome
 import dev.tizenarchive.companion.wifi.InstallMode
 import dev.tizenarchive.companion.wifi.PackageIdentity
@@ -39,8 +42,10 @@ import dev.tizenarchive.companion.wifi.WatchOutcome
 import dev.tizenarchive.companion.wifi.WatchRemoveOutcome
 import dev.tizenarchive.companion.wifi.WatchSettings
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -76,6 +81,8 @@ internal interface MainActions {
     fun askWatchRemoval(item: WatchPackage)
     fun confirmWatchRemoval()
     fun dismissWatchRemoval()
+    fun startCapture()
+    fun stopCapture()
 }
 
 /** The key under which the state of sending a companion again is kept (the list items use their file URI). */
@@ -186,6 +193,47 @@ internal sealed interface UpdateCheck {
 /** Things the app needs on the phone and cannot find. */
 internal enum class Missing { GALAXY_WEARABLE, GEAR_PLUGIN, INSTALL_PERMISSION }
 
+internal sealed interface CaptureStatus {
+    data object Connecting : CaptureStatus
+
+    data object Watching : CaptureStatus
+
+    data object NoWifi : CaptureStatus
+
+    /** The connection failed or broke; the capture tries again by itself. */
+    data class Problem(val error: SdbError) : CaptureStatus
+}
+
+/** Why a capture could not start, or why a captured package was not saved. */
+internal enum class CaptureHint { NO_FOLDER, NO_PERMISSION, NO_WRITE_ACCESS }
+
+internal enum class CaptureOutcome {
+    SAVED,
+
+    /** Saved, but the file has no distributor signature, so the watch will not accept it from another phone either. */
+    SAVED_UNSIGNED,
+
+    /** The folder already has a file of that name. */
+    ALREADY_THERE,
+
+    /** The watch's installer was faster. */
+    MISSED,
+    INVALID,
+    NOT_SAVED,
+}
+
+/** One package the capture met; [fileName] is the name in the folder, or the name on the watch when nothing was saved. */
+internal data class CapturedItem(val title: String, val fileName: String, val outcome: CaptureOutcome)
+
+/** The capture of deliveries; [running] false keeps the last results on screen. */
+internal data class CaptureState(
+    val running: Boolean = false,
+    val status: CaptureStatus = CaptureStatus.Connecting,
+    val receiving: List<Delivery> = emptyList(),
+    val items: List<CapturedItem> = emptyList(),
+    val hint: CaptureHint? = null,
+)
+
 /** Removing a companion from the phone also removes the app from the watch. */
 internal sealed interface RemovalState {
     data class Confirm(val companion: InstalledCompanion) : RemovalState
@@ -228,6 +276,7 @@ internal data class UiState(
     val watchList: WatchListState = WatchListState.Idle,
     val watchQuery: String = "",
     val watchRemoval: WatchRemoval? = null,
+    val capture: CaptureState = CaptureState(),
     /** Packages this app put on the watch; only these can be removed from the app. */
     val remembered: List<RememberedPackage> = emptyList(),
 ) {
@@ -293,6 +342,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             withContext(io) {
                 workDir.deleteRecursively()
                 File(platform.cacheDir, INCOMING_DIR).deleteRecursively()
+                File(platform.cacheDir, CAPTURE_DIR).deleteRecursively()
             }
         }
         viewModelScope.launch {
@@ -430,7 +480,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     // ---- Folder queue -------------------------------------------------------------------------------------
 
     fun onFolderPicked(uri: Uri) {
-        platform.takeReadPermission(uri)
+        platform.takeFolderPermission(uri)
         viewModelScope.launch {
             folders.save(uri)
             openFolder(uri)
@@ -471,6 +521,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     override fun setMode(mode: InstallMode) {
         if (_state.value.installing) return
+        if (mode != InstallMode.WIFI) stopCapture()
         _state.update { it.copy(mode = mode, watchAddressInvalid = false) }
         saveSettings()
     }
@@ -491,7 +542,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     override fun refreshWatchList() {
         val current = _state.value
-        if (current.mode != InstallMode.WIFI || current.installing || current.watchList == WatchListState.Loading) return
+        if (current.mode != InstallMode.WIFI || current.installing || current.capture.running || current.watchList == WatchListState.Loading) return
         val address = WatchAddress.parse(current.watchAddress.trim())
         if (address == null) {
             _state.update { it.copy(watchAddressInvalid = true) }
@@ -542,6 +593,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         }
         _state.update { it.copy(watchRemoval = WatchRemoval.Working(item)) }
         viewModelScope.launch {
+            releaseWatch()
             val failure = try {
                 when (val outcome = deps.watch.remove(address, item.id)) {
                     WatchRemoveOutcome.Removed -> null
@@ -593,6 +645,97 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         }
     }
 
+    // ---- Capturing what Galaxy Wearable delivers to the watch (Wi-Fi mode) -------------------------------
+
+    private var captureJob: Job? = null
+
+    /** Names saved by the running capture: the folder list is rescanned in the background and may lag behind. */
+    private val savedByCapture = mutableSetOf<String>()
+
+    override fun startCapture() {
+        val current = _state.value
+        if (current.capture.running || current.installing || current.mode != InstallMode.WIFI) return
+        val address = WatchAddress.parse(current.watchAddress.trim())
+        if (address == null) {
+            _state.update { it.copy(watchAddressInvalid = true) }
+            return
+        }
+        if (!platform.hasLocalNetworkAccess()) {
+            setCapture { it.copy(hint = CaptureHint.NO_PERMISSION) }
+            return
+        }
+        _state.update { it.copy(capture = CaptureState(running = true)) }
+        savedByCapture.clear()
+        captureJob = viewModelScope.launch {
+            val folder = folders.load()
+            if (folder == null) {
+                setCapture { it.copy(running = false, hint = CaptureHint.NO_FOLDER) }
+                return@launch
+            }
+            val dir = File(platform.cacheDir, CAPTURE_DIR)
+            progress.capturing(0)
+            try {
+                deps.watch.capture(address, dir) { onCaptureEvent(it, folder) }
+            } finally {
+                setCapture { it.copy(running = false, receiving = emptyList()) }
+                progress.stop()
+                withContext(NonCancellable + io) { dir.deleteRecursively() }
+            }
+        }
+    }
+
+    override fun stopCapture() {
+        captureJob?.cancel()
+    }
+
+    /** The watch takes one sdb connection at a time: a running capture gives way to whatever else needs the watch. */
+    private suspend fun releaseWatch() {
+        captureJob?.cancelAndJoin()
+    }
+
+    private fun setCapture(change: (CaptureState) -> CaptureState) = _state.update { it.copy(capture = change(it.capture)) }
+
+    private suspend fun onCaptureEvent(event: CaptureEvent, folder: Uri) {
+        when (event) {
+            CaptureEvent.Watching -> setCapture { it.copy(status = CaptureStatus.Watching) }
+            CaptureEvent.NoWifi -> setCapture { it.copy(status = CaptureStatus.NoWifi, receiving = emptyList()) }
+            is CaptureEvent.Problem -> setCapture { it.copy(status = CaptureStatus.Problem(event.error), receiving = emptyList()) }
+            is CaptureEvent.Receiving -> setCapture { it.copy(receiving = event.deliveries) }
+            is CaptureEvent.Result -> {
+                val item = withContext(io) { keepCaptured(event.result, folder) }
+                setCapture {
+                    it.copy(items = listOf(item) + it.items, hint = if (item.outcome == CaptureOutcome.NOT_SAVED) CaptureHint.NO_WRITE_ACCESS else it.hint)
+                }
+                if (item.outcome == CaptureOutcome.SAVED || item.outcome == CaptureOutcome.SAVED_UNSIGNED) {
+                    progress.capturing(savedByCapture.size)
+                    viewModelScope.launch { openFolder(folder) }
+                }
+            }
+        }
+    }
+
+    private fun keepCaptured(result: CaptureResult, folder: Uri): CapturedItem = when (result) {
+        is CaptureResult.Missed -> CapturedItem(result.name, result.name, CaptureOutcome.MISSED)
+        is CaptureResult.Invalid -> CapturedItem(result.name, result.name, CaptureOutcome.INVALID)
+        is CaptureResult.Captured -> try {
+            val info = result.info
+            val name = "${info.packageId}-${info.version ?: "0"}.${info.kind.extension}".replace(UNSAFE_NAME, "_")
+            val outcome = when {
+                name in savedByCapture || _state.value.files.any { it.name.equals(name, ignoreCase = true) } -> CaptureOutcome.ALREADY_THERE
+                !platform.saveToFolder(folder, name, result.file) -> CaptureOutcome.NOT_SAVED
+                else -> {
+                    savedByCapture += name
+                    if (result.storeSigned) CaptureOutcome.SAVED else CaptureOutcome.SAVED_UNSIGNED
+                }
+            }
+            CapturedItem(info.displayName ?: info.packageId, name, outcome)
+        } catch (e: IOException) {
+            CapturedItem(result.info.displayName ?: result.info.packageId, result.info.packageId, CaptureOutcome.NOT_SAVED)
+        } finally {
+            result.file.delete()
+        }
+    }
+
     private fun saveSettings() {
         val current = _state.value
         viewModelScope.launch { withContext(io) { deps.watchSettings.save(WatchSettings(current.mode, current.watchAddress, current.reinstall)) } }
@@ -618,6 +761,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         _state.update { it.copy(installing = true, states = queue.associate { f -> f.uri to ItemState.Queued }) }
         job = viewModelScope.launch {
             try {
+                releaseWatch()
                 for ((index, file) in queue.withIndex()) {
                     position = Triple(index + 1, queue.size, _state.value.previews[file.uri]?.name ?: file.name)
                     processLocal(file)
@@ -647,6 +791,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     override fun cancel() {
         job?.cancel()
+        captureJob?.cancel()
     }
 
     // ---- Files from other apps ("Open with", "Share") -------------------------------------------------
@@ -745,6 +890,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         job = viewModelScope.launch {
             var final: ItemState = ItemState.Cancelled
             try {
+                releaseWatch()
                 final = runCatchingItem(::set) {
                     set(ItemState.Downloading(0))
                     val local = File(workDir, "package.bin")
@@ -922,6 +1068,8 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         const val GALAXY_WEARABLE = "com.samsung.android.app.watchmanager"
         const val GEAR_PLUGIN = "com.samsung.android.geargplugin"
         const val INCOMING_DIR = "incoming"
+        const val CAPTURE_DIR = "capture"
+        val UNSAFE_NAME = Regex("[^A-Za-z0-9._-]")
         const val MAX_INCOMING = 200
         const val MAX_PREVIEWS = 1000
         const val PREVIEW_BATCH = 8

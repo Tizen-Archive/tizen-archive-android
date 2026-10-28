@@ -158,4 +158,28 @@
     <string name="source_wifi">Packages the watch reports over Wi-Fi · %1$s</string>
     <string name="remote_route_wifi">It will be installed over Wi-Fi on %1$s.</string>
     <string name="remote_route_companion">It will be installed through Galaxy Wearable.</string>
+    <string name="capture_title">Save packages from Galaxy Store</string>
+    <string name="capture_intro">While this is on, packages that Galaxy Wearable sends to the watch (installs from Galaxy Store, companion apps) are copied into the chosen folder, before the watch deletes them. Keep the watch screen on and install as usual. Only files are read on the watch; nothing is changed there.</string>
+    <string name="capture_start">Start</string>
+    <string name="capture_stop">Stop</string>
+    <string name="capture_connecting">Connecting to the watch…</string>
+    <string name="capture_watching">Waiting for packages…</string>
+    <string name="capture_no_wifi">The phone is not on Wi-Fi. Waiting for it…</string>
+    <string name="capture_problem">%1$s Trying again…</string>
+    <string name="capture_receiving">Arriving: %1$s</string>
+    <string name="capture_no_folder">Choose a folder on the Install tab first: packages are saved there.</string>
+    <string name="capture_no_permission">Allow access to devices on the local network for this app.</string>
+    <string name="capture_no_write">The app may not write to the folder. Choose the folder again on the Install tab.</string>
+    <string name="capture_saved">Saved as %1$s</string>
+    <string name="capture_saved_unsigned">Saved as %1$s, but without the store signature: other watches will not accept it.</string>
+    <string name="capture_already_there">Already in the folder: %1$s</string>
+    <string name="capture_missed">The watch was faster and deleted it before it was copied.</string>
+    <string name="capture_invalid">Not a Tizen package.</string>
+    <string name="capture_not_saved">Not saved.</string>
+    <string name="capture_busy_note">While saving is on, the list of packages on the watch is not available.</string>
+    <string name="capture_notification_title">Saving packages from Galaxy Store</string>
+    <plurals name="capture_notification_saved">
+        <item quantity="one">%1$d package saved</item>
+        <item quantity="other">%1$d packages saved</item>
+    </plurals>
 </resources>

@@ -164,4 +164,30 @@
     <string name="source_wifi">Пакеты, о которых сообщают часы по Wi-Fi · %1$s</string>
     <string name="remote_route_wifi">Будет установлено по Wi-Fi на %1$s.</string>
     <string name="remote_route_companion">Будет установлено через Galaxy Wearable.</string>
+    <string name="capture_title">Сохранять пакеты из Galaxy Store</string>
+    <string name="capture_intro">Пока включено, пакеты, которые Galaxy Wearable отправляет на часы (установка из Galaxy Store, приложения-компаньоны), копируются в выбранную папку, прежде чем часы их удалят. Держите экран часов включённым и устанавливайте как обычно. На часах файлы только читаются, ничего не меняется.</string>
+    <string name="capture_start">Включить</string>
+    <string name="capture_stop">Остановить</string>
+    <string name="capture_connecting">Подключение к часам…</string>
+    <string name="capture_watching">Жду пакеты…</string>
+    <string name="capture_no_wifi">Телефон не подключён к Wi-Fi. Жду…</string>
+    <string name="capture_problem">%1$s Пробую снова…</string>
+    <string name="capture_receiving">Передаётся: %1$s</string>
+    <string name="capture_no_folder">Сначала выберите папку на вкладке «Установка»: пакеты сохраняются туда.</string>
+    <string name="capture_no_permission">Разрешите приложению доступ к устройствам в локальной сети.</string>
+    <string name="capture_no_write">Приложению нельзя записывать в папку. Выберите папку заново на вкладке «Установка».</string>
+    <string name="capture_saved">Сохранён как %1$s</string>
+    <string name="capture_saved_unsigned">Сохранён как %1$s, но без подписи магазина: другие часы его не примут.</string>
+    <string name="capture_already_there">Уже есть в папке: %1$s</string>
+    <string name="capture_missed">Часы успели удалить файл раньше, чем он был скопирован.</string>
+    <string name="capture_invalid">Это не пакет Tizen.</string>
+    <string name="capture_not_saved">Не сохранён.</string>
+    <string name="capture_busy_note">Пока сохранение включено, список пакетов на часах недоступен.</string>
+    <string name="capture_notification_title">Сохранение пакетов из Galaxy Store</string>
+    <plurals name="capture_notification_saved">
+        <item quantity="one">Сохранён %1$d пакет</item>
+        <item quantity="few">Сохранено %1$d пакета</item>
+        <item quantity="many">Сохранено %1$d пакетов</item>
+        <item quantity="other">Сохранено %1$d пакета</item>
+    </plurals>
 </resources>

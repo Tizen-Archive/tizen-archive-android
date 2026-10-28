@@ -37,6 +37,10 @@ class WatchInstallerTest {
             progress(bytes.size.toLong())
         }
 
+        override fun list(remoteDir: String): List<RemoteEntry> = emptyList()
+
+        override fun pull(remotePath: String, out: java.io.OutputStream, maxBytes: Long): Boolean = false
+
         override fun close() = Unit
     }
 

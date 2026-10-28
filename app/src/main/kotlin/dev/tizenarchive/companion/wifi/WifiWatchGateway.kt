@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import dev.tizenarchive.companion.capture.Delivery
+import dev.tizenarchive.companion.capture.DeliveryCapture
 import dev.tizenarchive.companion.catalog.VersionCompare
 import dev.tizenarchive.companion.sdb.InstallProgress
 import dev.tizenarchive.companion.sdb.PackageType
@@ -24,6 +26,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -60,32 +64,73 @@ internal class WifiWatchGateway(
             if (result.success) WatchRemoveOutcome.Removed else WatchRemoveOutcome.Refused(result.code, result.message)
         }
 
+    override suspend fun capture(address: InetAddress, workDir: File, onEvent: suspend (CaptureEvent) -> Unit) = withContext(io) {
+        while (true) {
+            val network = wifiNetwork()
+            if (network == null) {
+                onEvent(CaptureEvent.NoWifi)
+                delay(CAPTURE_RETRY_MS)
+                continue
+            }
+            var problem = SdbError.DISCONNECTED
+            try {
+                session(network, address) { session ->
+                    val capture = DeliveryCapture(session, workDir)
+                    onEvent(CaptureEvent.Watching)
+                    while (true) {
+                        var receiving = emptyList<Delivery>()
+                        val results = runInterruptible { capture.poll { receiving = it } }
+                        onEvent(CaptureEvent.Receiving(receiving))
+                        results.forEach { onEvent(CaptureEvent.Result(it)) }
+                        delay(CAPTURE_POLL_MS)
+                    }
+                }
+            } catch (e: SdbException) {
+                problem = e.error
+            } catch (e: IOException) {
+                problem = SdbError.UNREACHABLE
+            }
+            // Stopping closes the socket, which surfaces as a broken connection: that is not worth reporting
+            ensureActive()
+            onEvent(CaptureEvent.Problem(problem))
+            delay(CAPTURE_RETRY_MS)
+        }
+    }
+
     /** Runs [block] in an authorized session over the Wi-Fi network; cancelling the caller closes the socket, which ends a blocking call at once. */
     private suspend fun <T> withWatch(address: InetAddress, noWifi: T, problem: (SdbError) -> T, block: (SdbSession) -> T): T = withContext(io) {
         val network = wifiNetwork() ?: return@withContext noWifi
-        val socket = Socket()
         try {
-            network.bindSocket(socket)
-            val session = SdbSession.connect(socket, InetSocketAddress(address, SDB_PORT), keys.signer(), keyName())
-            coroutineScope {
-                val closer = launch {
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        session.close()
-                    }
-                }
-                try {
-                    block(session)
-                } finally {
-                    closer.cancel()
-                }
-            }
+            session(network, address) { block(it) }
         } catch (e: SdbException) {
             problem(e.error)
         } catch (e: IOException) {
-            socket.close()
             problem(SdbError.UNREACHABLE)
+        }
+    }
+
+    private suspend fun <T> session(network: Network, address: InetAddress, block: suspend (SdbSession) -> T): T {
+        val socket = Socket()
+        try {
+            network.bindSocket(socket)
+        } catch (e: IOException) {
+            socket.close()
+            throw e
+        }
+        val session = SdbSession.connect(socket, InetSocketAddress(address, SDB_PORT), keys.signer(), keyName())
+        return coroutineScope {
+            val closer = launch {
+                try {
+                    awaitCancellation()
+                } finally {
+                    session.close()
+                }
+            }
+            try {
+                block(session)
+            } finally {
+                closer.cancel()
+            }
         }
     }
 
@@ -119,5 +164,9 @@ internal class WifiWatchGateway(
 
     private companion object {
         const val SDB_PORT = 26101
+
+        /** A small package stays on the watch about 3 s after it arrived. */
+        const val CAPTURE_POLL_MS = 1_500L
+        const val CAPTURE_RETRY_MS = 5_000L
     }
 }

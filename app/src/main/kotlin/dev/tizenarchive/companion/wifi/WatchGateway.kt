@@ -1,5 +1,7 @@
 package dev.tizenarchive.companion.wifi
 
+import dev.tizenarchive.companion.capture.CaptureResult
+import dev.tizenarchive.companion.capture.Delivery
 import dev.tizenarchive.companion.sdb.FoundWatch
 import dev.tizenarchive.companion.sdb.InstallProgress
 import dev.tizenarchive.companion.sdb.PackageType
@@ -56,6 +58,22 @@ internal sealed interface FindOutcome {
     data object NoSubnet : FindOutcome
 }
 
+internal sealed interface CaptureEvent {
+    /** Connected; the delivery directory is looked at every couple of seconds. */
+    data object Watching : CaptureEvent
+
+    /** Files still arriving at the watch, after each look (empty when none). */
+    data class Receiving(val deliveries: List<Delivery>) : CaptureEvent
+
+    data class Result(val result: CaptureResult) : CaptureEvent
+
+    /** The connection failed or broke; another attempt follows. */
+    data class Problem(val error: SdbError) : CaptureEvent
+
+    /** The phone is not connected to a Wi-Fi network; another attempt follows. */
+    data object NoWifi : CaptureEvent
+}
+
 /** Installs a package on a watch over Wi-Fi; [WifiWatchGateway] is the real one, tests use fakes. */
 internal interface WatchGateway {
     /** When [skipIfInstalled] is given and the watch already has that version or a newer one, nothing is sent. */
@@ -74,4 +92,10 @@ internal interface WatchGateway {
 
     /** Looks for watches in the Wi-Fi network of the phone. */
     suspend fun find(): FindOutcome
+
+    /**
+     * Copies into [workDir] the packages that Galaxy Wearable delivers to the watch, reconnecting when the connection breaks.
+     * Returns only by cancellation. The session holds the watch: other calls fail as busy meanwhile.
+     */
+    suspend fun capture(address: InetAddress, workDir: File, onEvent: suspend (CaptureEvent) -> Unit)
 }

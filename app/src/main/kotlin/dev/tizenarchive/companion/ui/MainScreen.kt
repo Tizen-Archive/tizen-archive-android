@@ -742,11 +742,18 @@ private fun WifiWatchTab(padding: PaddingValues, state: UiState, actions: MainAc
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item { SourceNote(stringResource(R.string.source_wifi, state.watchAddress.trim())) }
+        item { CaptureCard(state.capture, startEnabled = !state.installing, actions) }
         item { Text(stringResource(R.string.watch_wifi_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item {
-            OutlinedButton(onClick = actions::refreshWatchList, enabled = !state.installing && state.watchList != WatchListState.Loading) {
+            OutlinedButton(
+                onClick = actions::refreshWatchList,
+                enabled = !state.installing && !state.capture.running && state.watchList != WatchListState.Loading,
+            ) {
                 Text(stringResource(R.string.watch_wifi_refresh))
             }
+        }
+        if (state.capture.running) {
+            item { Text(stringResource(R.string.capture_busy_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (state.watchAddressInvalid) {
             item { Text(stringResource(R.string.watch_address_invalid), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -798,6 +805,57 @@ private fun WifiWatchTab(padding: PaddingValues, state: UiState, actions: MainAc
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CaptureCard(capture: CaptureState, startEnabled: Boolean, actions: MainActions) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val error = MaterialTheme.colorScheme.error
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.capture_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.capture_intro), style = MaterialTheme.typography.bodySmall, color = muted)
+            if (capture.running) {
+                OutlinedButton(onClick = actions::stopCapture) { Text(stringResource(R.string.capture_stop)) }
+                val status = when (val s = capture.status) {
+                    CaptureStatus.Connecting -> stringResource(R.string.capture_connecting)
+                    CaptureStatus.Watching -> stringResource(R.string.capture_watching)
+                    CaptureStatus.NoWifi -> stringResource(R.string.capture_no_wifi)
+                    is CaptureStatus.Problem -> stringResource(R.string.capture_problem, stringResource(watchProblemText(s.error)))
+                }
+                val trouble = capture.status is CaptureStatus.Problem || capture.status == CaptureStatus.NoWifi
+                Text(status, style = MaterialTheme.typography.bodySmall, color = if (trouble) error else muted)
+                for (delivery in capture.receiving) {
+                    val size = delivery.expectedSize?.let { "${formatSize(delivery.size)} / ${formatSize(it)}" } ?: formatSize(delivery.size)
+                    Text(stringResource(R.string.capture_receiving, size), style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                Button(onClick = actions::startCapture, enabled = startEnabled) { Text(stringResource(R.string.capture_start)) }
+            }
+            capture.hint?.let { hint ->
+                val text = when (hint) {
+                    CaptureHint.NO_FOLDER -> R.string.capture_no_folder
+                    CaptureHint.NO_PERMISSION -> R.string.capture_no_permission
+                    CaptureHint.NO_WRITE_ACCESS -> R.string.capture_no_write
+                }
+                Text(stringResource(text), style = MaterialTheme.typography.bodySmall, color = error)
+            }
+            for (item in capture.items) {
+                Column {
+                    Text(item.title, style = MaterialTheme.typography.bodyMedium)
+                    val (text, bad) = when (item.outcome) {
+                        CaptureOutcome.SAVED -> stringResource(R.string.capture_saved, item.fileName) to false
+                        CaptureOutcome.SAVED_UNSIGNED -> stringResource(R.string.capture_saved_unsigned, item.fileName) to true
+                        CaptureOutcome.ALREADY_THERE -> stringResource(R.string.capture_already_there, item.fileName) to false
+                        CaptureOutcome.MISSED -> stringResource(R.string.capture_missed) to true
+                        CaptureOutcome.INVALID -> stringResource(R.string.capture_invalid) to true
+                        CaptureOutcome.NOT_SAVED -> stringResource(R.string.capture_not_saved) to true
+                    }
+                    Text(text, style = MaterialTheme.typography.bodySmall, color = if (bad) error else muted)
                 }
             }
         }

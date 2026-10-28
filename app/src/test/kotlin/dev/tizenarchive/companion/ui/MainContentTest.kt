@@ -58,6 +58,8 @@ private class RecordingActions : MainActions {
     override fun askWatchRemoval(item: WatchPackage) { calls += "askWatchRemoval ${item.id}" }
     override fun confirmWatchRemoval() { calls += "confirmWatchRemoval" }
     override fun dismissWatchRemoval() { calls += "dismissWatchRemoval" }
+    override fun startCapture() { calls += "startCapture" }
+    override fun stopCapture() { calls += "stopCapture" }
 }
 
 /** A tall screen, so that lazy list rows are composed without scrolling. */
@@ -363,6 +365,38 @@ class MainContentTest {
         compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
         compose.onNodeWithText(str(R.string.watch_wifi_shown, 2, 3)).assertExists()
         compose.onAllNodesWithText(str(R.string.watch_wifi_count, 3)).assertCountEquals(0)
+    }
+
+    @Test
+    fun `the capture card starts the capture`() {
+        show(UiState(mode = InstallMode.WIFI))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.capture_title)).assertExists()
+        compose.onNodeWithText(str(R.string.capture_start)).performClick()
+        compose.runOnIdle { assertEquals("startCapture", actions.calls.last()) }
+    }
+
+    @Test
+    fun `a running capture shows its status and results and can be stopped`() {
+        val capture = CaptureState(
+            running = true,
+            status = CaptureStatus.Watching,
+            items = listOf(
+                CapturedItem("Water cleaner", "com.vadvergasov.watercleaner-2.2.0.tpk", CaptureOutcome.SAVED),
+                CapturedItem("watcher.tpk", "watcher.tpk", CaptureOutcome.MISSED),
+            ),
+            hint = CaptureHint.NO_WRITE_ACCESS,
+        )
+        show(UiState(mode = InstallMode.WIFI, capture = capture))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.capture_watching)).assertExists()
+        compose.onNodeWithText(str(R.string.capture_saved, "com.vadvergasov.watercleaner-2.2.0.tpk")).assertExists()
+        compose.onNodeWithText(str(R.string.capture_missed)).assertExists()
+        compose.onNodeWithText(str(R.string.capture_no_write)).assertExists()
+        compose.onNodeWithText(str(R.string.capture_busy_note)).assertExists()
+        compose.onNodeWithText(str(R.string.watch_wifi_refresh)).assertIsNotEnabled()
+        compose.onNodeWithText(str(R.string.capture_stop)).performClick()
+        compose.runOnIdle { assertEquals("stopCapture", actions.calls.last()) }
     }
 
     @Test
