@@ -8,6 +8,7 @@ Features:
 • Works with the "Install on the watch" button of the Tizen Archive catalog (tizen-archive.com): the package is downloaded and verified (SHA-256 and size) before it is installed.
 • Wi-Fi: "Find the watch" looks for the watch in your network, so no other app is needed to learn its IP address. The queue shows sending and installation progress and the exact answer of the watch if it refuses a package. A version the watch already has is skipped.
 • Wi-Fi: the "On the watch" tab lists the packages the watch reports, with search, and removes the ones this app installed.
+• Wi-Fi: "Save packages from Galaxy Store" keeps a copy of every package you install on the watch with Galaxy Wearable (for example apps you bought before) in the chosen folder, with the original store signature, to reinstall later or keep as a backup. The watch is only read, nothing on it is changed.
 • The keys live in the Android Keystore; nothing is uploaded anywhere, there are no ads, analytics or trackers.
 
 Requirements:

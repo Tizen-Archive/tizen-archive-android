@@ -1,0 +1,1 @@
+New: save packages from Galaxy Store (Wi-Fi way, "On the watch" tab). While it is on, every package Galaxy Wearable sends to the watch is copied into the chosen folder with its original store signature. Packages signed by Samsung partner CAs are now recognized as store-signed. A folder chosen before has to be chosen again to allow saving.
