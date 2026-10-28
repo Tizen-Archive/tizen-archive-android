@@ -36,6 +36,11 @@ Both ways install only what the watch's own package manager accepts (a valid sto
   A version the watch already has, or a newer one, is skipped (an option installs it again). The "On the watch" tab then shows the
   packages the watch itself reports, with search, and removes the ones this app installed (the watch does not tell
   system packages apart, so only the app's own can be removed).
+- Wi-Fi way: **Save packages from Galaxy Store** keeps a copy of what you install on the watch with Galaxy Wearable
+  (from Galaxy Store, which still serves apps you bought before, or from a companion app). While it is on, the app looks
+  every 1.5 s at the directory where the watch keeps a delivered package until its installer is done with it, copies
+  each complete package and saves it in the chosen folder as `<id>-<version>.<tpk|wgt>`, with the original store
+  signature, so you can reinstall it later or keep a backup of your purchases. It only reads files on the watch.
 - Galaxy Wearable way: a card tells what is missing (Galaxy Wearable, Gear Plugin, the install permission); the screen stays on while a queue
   runs and a notification reports its end. While a queue runs a foreground service keeps the app alive when you switch
   away, with a progress notification (and Cancel); when the app is in the background, Android's install confirmation
@@ -93,6 +98,10 @@ Wi-Fi way:
 - Removing a package from the "On the watch" tab also deletes its data on the watch.
 - Not tested: a watch connected to the phone's own hotspot. "Find the watch" may not see it there (the search uses the
   phone's Wi-Fi network); type the watch's address by hand.
+- Saving packages from Galaxy Store holds the connection to the watch, so the list of the watch's packages is not
+  available meanwhile, and sending over Wi-Fi or removing a package stops it first. A small package stays on the watch
+  for a few seconds only: keep the watch's screen on. The folder must be writable; a folder chosen before version 0.3.0
+  has to be chosen again. Saving runs as a foreground service, which Android 15 and newer limit to a few hours a day.
 - Not supported: `sdb` over Bluetooth. The watches' sdb daemon closes such connections at once (checked on SM-R800), so
   the app uses Wi-Fi.
 
@@ -112,7 +121,8 @@ Galaxy Wearable way:
 
 - `core` (JVM, no Android API): binary `AndroidManifest.xml` writer, companion APK writer, Tizen package reader,
   naming, signing with `apksig`, delivery pacing, catalog client, and an `sdb` host (`sdb` package: packets, RSA
-  authorization, the `shell` and `sync` services, `pkgcmd` output parsing, the installer, the scanner that finds watches).
+  authorization, the `shell` and `sync` services, `pkgcmd` output parsing, the installer, the scanner that finds watches)
+  and the capture of deliveries (`capture` package).
 - `app`: Compose UI, Storage Access Framework folder scan, Android Keystore signing key, `PackageInstaller` queue, and
   the Wi-Fi way (`wifi` package: Keystore host key, network binding that avoids VPNs, settings and history).
 
