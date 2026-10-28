@@ -31,6 +31,8 @@ import dev.tizenarchive.companion.sdb.InstallProgress
 import dev.tizenarchive.companion.sdb.PackageType
 import dev.tizenarchive.companion.sdb.SdbError
 import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.signature.SignatureAssessment
+import dev.tizenarchive.companion.signature.SignatureVerdict
 import dev.tizenarchive.companion.tizen.TizenPackageInfo
 import dev.tizenarchive.companion.tizen.TizenPackageKind
 import dev.tizenarchive.companion.tizenPackage
@@ -1022,7 +1024,8 @@ class MainViewModelTest {
 
     private fun captured(id: String, version: String, signed: Boolean = true): CaptureEvent.Result {
         val file = tmp.newFile().apply { writeBytes(tizenPackage(id, version)) }
-        return CaptureEvent.Result(CaptureResult.Captured(file, TizenPackageInfo(TizenPackageKind.TPK, id, version, "App $id"), signed))
+        val signature = SignatureAssessment(if (signed) SignatureVerdict.STORE_SIGNED else SignatureVerdict.UNSIGNED)
+        return CaptureEvent.Result(CaptureResult.Captured(file, TizenPackageInfo(TizenPackageKind.TPK, id, version, "App $id"), signature))
     }
 
     @Test
@@ -1050,7 +1053,7 @@ class MainViewModelTest {
             listOf(
                 CaptureOutcome.INVALID to "watcher.wgt",
                 CaptureOutcome.MISSED to "watcher.tpk",
-                CaptureOutcome.SAVED_UNSIGNED to "com.b-2.0.tpk",
+                CaptureOutcome.SAVED_WARNING to "com.b-2.0.tpk",
                 CaptureOutcome.SAVED to "com.a-1.0.tpk",
             ),
             capture.items.map { it.outcome to it.fileName },

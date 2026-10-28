@@ -849,7 +849,7 @@ private fun CaptureCard(capture: CaptureState, startEnabled: Boolean, actions: M
                     Text(item.title, style = MaterialTheme.typography.bodyMedium)
                     val (text, bad) = when (item.outcome) {
                         CaptureOutcome.SAVED -> stringResource(R.string.capture_saved, item.fileName) to false
-                        CaptureOutcome.SAVED_UNSIGNED -> stringResource(R.string.capture_saved_unsigned, item.fileName) to true
+                        CaptureOutcome.SAVED_WARNING -> stringResource(R.string.capture_saved_warning, item.fileName) to true
                         CaptureOutcome.ALREADY_THERE -> stringResource(R.string.capture_already_there, item.fileName) to false
                         CaptureOutcome.MISSED -> stringResource(R.string.capture_missed) to true
                         CaptureOutcome.INVALID -> stringResource(R.string.capture_invalid) to true

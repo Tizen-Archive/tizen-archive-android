@@ -177,7 +177,7 @@
     <string name="capture_no_permission">Разрешите приложению доступ к устройствам в локальной сети.</string>
     <string name="capture_no_write">Приложению нельзя записывать в папку. Выберите папку заново на вкладке «Установка».</string>
     <string name="capture_saved">Сохранён как %1$s</string>
-    <string name="capture_saved_unsigned">Сохранён как %1$s, но без подписи магазина: другие часы его не примут.</string>
+    <string name="capture_saved_warning">Сохранён как %1$s, но другие часы его подпись, скорее всего, не примут.</string>
     <string name="capture_already_there">Уже есть в папке: %1$s</string>
     <string name="capture_missed">Часы успели удалить файл раньше, чем он был скопирован.</string>
     <string name="capture_invalid">Это не пакет Tizen.</string>

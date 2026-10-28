@@ -1,16 +1,19 @@
 package dev.tizenarchive.companion.capture
 
 import dev.tizenarchive.companion.sdb.SdbService
+import dev.tizenarchive.companion.signature.SignatureAssessment
+import dev.tizenarchive.companion.signature.SignatureInspector
 import dev.tizenarchive.companion.tizen.InvalidTizenPackageException
 import dev.tizenarchive.companion.tizen.TizenPackageInfo
 import dev.tizenarchive.companion.tizen.TizenPackageReader
 import java.io.File
-import java.io.IOException
-import java.util.zip.ZipFile
 
 public sealed interface CaptureResult {
-    /** [file] is a copy in the work directory that the caller moves or deletes; [storeSigned] means it has `signature1.xml`. */
-    public class Captured(public val file: File, public val info: TizenPackageInfo, public val storeSigned: Boolean) : CaptureResult
+    /**
+     * [file] is a copy in the work directory that the caller moves or deletes. [signature] predicts whether other watches accept
+     * the package; null when its signature cannot be read.
+     */
+    public class Captured(public val file: File, public val info: TizenPackageInfo, public val signature: SignatureAssessment?) : CaptureResult
 
     /** The watch's installer removed the file before it could be copied. */
     public class Missed(public val name: String) : CaptureResult
@@ -30,14 +33,18 @@ public class DeliveryCapture(
 ) {
     private val tracker = DeliveryTracker()
 
-    /** One look at the directory; [onReceiving] sees the files still arriving. */
-    public fun poll(onReceiving: (List<Delivery>) -> Unit = {}): List<CaptureResult> {
+    /**
+     * One look at the directory; [onReceiving] sees the files still arriving, [onResult] each delivery as soon as it is copied,
+     * so that a connection breaking on a later file does not lose the earlier ones.
+     */
+    public fun poll(onReceiving: (List<Delivery>) -> Unit = {}, onResult: (CaptureResult) -> Unit) {
         val observation = tracker.observe(service.list(directory))
         onReceiving(observation.receiving)
-        return observation.ready.map(::take)
+        observation.ready.forEach { delivery -> take(delivery)?.let(onResult) }
     }
 
-    private fun take(delivery: Delivery): CaptureResult {
+    /** Null when a companion file turned out incomplete: it is offered again by the next look. */
+    private fun take(delivery: Delivery): CaptureResult? {
         workDir.mkdirs()
         val copy = File.createTempFile("capture", ".part", workDir)
         val found = try {
@@ -54,22 +61,18 @@ public class DeliveryCapture(
             TizenPackageReader.read(copy)
         } catch (e: InvalidTizenPackageException) {
             copy.delete()
-            if (delivery.expectedSize == null) tracker.retry(delivery.name)
+            if (delivery.expectedSize == null) {
+                tracker.retry(delivery.name)
+                return null
+            }
             return CaptureResult.Invalid(delivery.name)
         }
-        return CaptureResult.Captured(copy, info, hasDistributorSignature(copy))
-    }
-
-    private fun hasDistributorSignature(file: File): Boolean = try {
-        ZipFile(file).use { it.getEntry(DISTRIBUTOR_SIGNATURE) != null }
-    } catch (e: IOException) {
-        false
+        return CaptureResult.Captured(copy, info, SignatureInspector.inspect(copy))
     }
 
     public companion object {
         /** Where the watch's Wearable Manager Service keeps a delivered package; the shell may not list it, the file service may. */
         public const val DELIVERY_DIR: String = "/opt/usr/home/owner/apps_rw/com.samsung.w-manager-service/data"
-        private const val DISTRIBUTOR_SIGNATURE = "signature1.xml"
         private const val MAX_SIZE = 512L shl 20
     }
 }

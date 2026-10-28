@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import dev.tizenarchive.companion.capture.CaptureResult
 import dev.tizenarchive.companion.capture.Delivery
 import dev.tizenarchive.companion.capture.DeliveryCapture
 import dev.tizenarchive.companion.catalog.VersionCompare
@@ -79,7 +80,14 @@ internal class WifiWatchGateway(
                     onEvent(CaptureEvent.Watching)
                     while (true) {
                         var receiving = emptyList<Delivery>()
-                        val results = runInterruptible { capture.poll { receiving = it } }
+                        val results = mutableListOf<CaptureResult>()
+                        try {
+                            runInterruptible { capture.poll({ receiving = it }) { results += it } }
+                        } catch (e: SdbException) {
+                            // What was copied before the connection broke is gone from the watch by the time it comes back
+                            results.forEach { onEvent(CaptureEvent.Result(it)) }
+                            throw e
+                        }
                         onEvent(CaptureEvent.Receiving(receiving))
                         results.forEach { onEvent(CaptureEvent.Result(it)) }
                         delay(CAPTURE_POLL_MS)
