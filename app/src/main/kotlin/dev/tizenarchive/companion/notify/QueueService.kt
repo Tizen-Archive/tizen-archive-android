@@ -24,8 +24,12 @@ internal class QueueService : Service() {
         return START_NOT_STICKY
     }
 
-    /** Android 15 limits data-sync services to a few hours a day and calls this when the time is up. */
+    /**
+     * Android 15 limits data-sync services to a few hours a day and calls this when the time is up. The work stops too: without
+     * the service the process may be frozen at any moment, and a capture left on would otherwise run on unnoticed.
+     */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        cancelHandler?.invoke()
         stopSelf()
     }
 

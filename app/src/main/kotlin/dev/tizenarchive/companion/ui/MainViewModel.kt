@@ -46,6 +46,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -210,8 +211,8 @@ internal enum class CaptureHint { NO_FOLDER, NO_PERMISSION, NO_WRITE_ACCESS }
 internal enum class CaptureOutcome {
     SAVED,
 
-    /** Saved, but the file has no distributor signature, so the watch will not accept it from another phone either. */
-    SAVED_UNSIGNED,
+    /** Saved, but its signature will probably not be accepted by other watches. */
+    SAVED_WARNING,
 
     /** The folder already has a file of that name. */
     ALREADY_THERE,
@@ -402,6 +403,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
         job = viewModelScope.launch {
             try {
+                releaseWatch()
                 processItem(key) { target, _ -> CompanionApk.extractPackage(File(companion.sourceDir), target) }
             } finally {
                 _state.update { it.copy(installing = false) }
@@ -455,6 +457,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
         job = viewModelScope.launch {
             try {
+                releaseWatch()
                 processItem(key) { target, set ->
                     set(ItemState.Downloading(0))
                     var lastPercent = -1
@@ -655,6 +658,8 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     override fun startCapture() {
         val current = _state.value
         if (current.capture.running || current.installing || current.mode != InstallMode.WIFI) return
+        // The watch takes one connection at a time: a list or a removal on its way has it now
+        if (current.watchList == WatchListState.Loading || current.watchRemoval is WatchRemoval.Working) return
         val address = WatchAddress.parse(current.watchAddress.trim())
         if (address == null) {
             _state.update { it.copy(watchAddressInvalid = true) }
@@ -667,16 +672,27 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         _state.update { it.copy(capture = CaptureState(running = true)) }
         savedByCapture.clear()
         captureJob = viewModelScope.launch {
-            val folder = folders.load()
-            if (folder == null) {
+            if (folders.load() == null) {
                 setCapture { it.copy(running = false, hint = CaptureHint.NO_FOLDER) }
                 return@launch
             }
             val dir = File(platform.cacheDir, CAPTURE_DIR)
+            // Saving runs apart from the polling, so that copying a large package into the folder does not delay the next look
+            val captured = Channel<CaptureResult>(Channel.UNLIMITED)
+            val saver = launch { for (result in captured) keepCaptured(result) }
             progress.capturing(0)
             try {
-                deps.watch.capture(address, dir) { onCaptureEvent(it, folder) }
+                deps.watch.capture(address, dir) { event ->
+                    when (event) {
+                        CaptureEvent.Watching -> setCapture { it.copy(status = CaptureStatus.Watching) }
+                        CaptureEvent.NoWifi -> setCapture { it.copy(status = CaptureStatus.NoWifi, receiving = emptyList()) }
+                        is CaptureEvent.Problem -> setCapture { it.copy(status = CaptureStatus.Problem(event.error), receiving = emptyList()) }
+                        is CaptureEvent.Receiving -> setCapture { it.copy(receiving = event.deliveries) }
+                        is CaptureEvent.Result -> captured.send(event.result)
+                    }
+                }
             } finally {
+                saver.cancel()
                 setCapture { it.copy(running = false, receiving = emptyList()) }
                 progress.stop()
                 withContext(NonCancellable + io) { dir.deleteRecursively() }
@@ -695,44 +711,42 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     private fun setCapture(change: (CaptureState) -> CaptureState) = _state.update { it.copy(capture = change(it.capture)) }
 
-    private suspend fun onCaptureEvent(event: CaptureEvent, folder: Uri) {
-        when (event) {
-            CaptureEvent.Watching -> setCapture { it.copy(status = CaptureStatus.Watching) }
-            CaptureEvent.NoWifi -> setCapture { it.copy(status = CaptureStatus.NoWifi, receiving = emptyList()) }
-            is CaptureEvent.Problem -> setCapture { it.copy(status = CaptureStatus.Problem(event.error), receiving = emptyList()) }
-            is CaptureEvent.Receiving -> setCapture { it.copy(receiving = event.deliveries) }
-            is CaptureEvent.Result -> {
-                val item = withContext(io) { keepCaptured(event.result, folder) }
-                setCapture {
-                    it.copy(items = listOf(item) + it.items, hint = if (item.outcome == CaptureOutcome.NOT_SAVED) CaptureHint.NO_WRITE_ACCESS else it.hint)
-                }
-                if (item.outcome == CaptureOutcome.SAVED || item.outcome == CaptureOutcome.SAVED_UNSIGNED) {
-                    progress.capturing(savedByCapture.size)
-                    viewModelScope.launch { openFolder(folder) }
-                }
+    /** Saves into the folder chosen now, which may have changed since the capture started. */
+    private suspend fun keepCaptured(result: CaptureResult) {
+        val folder = folders.load()
+        val item = withContext(io) {
+            try {
+                describe(result, folder)
+            } finally {
+                (result as? CaptureResult.Captured)?.file?.delete()
             }
+        }
+        setCapture {
+            it.copy(items = listOf(item) + it.items, hint = if (item.outcome == CaptureOutcome.NOT_SAVED) CaptureHint.NO_WRITE_ACCESS else it.hint)
+        }
+        if (folder != null && (item.outcome == CaptureOutcome.SAVED || item.outcome == CaptureOutcome.SAVED_WARNING)) {
+            progress.capturing(savedByCapture.size)
+            refreshFolder(folder)
         }
     }
 
-    private fun keepCaptured(result: CaptureResult, folder: Uri): CapturedItem = when (result) {
+    private fun describe(result: CaptureResult, folder: Uri?): CapturedItem = when (result) {
         is CaptureResult.Missed -> CapturedItem(result.name, result.name, CaptureOutcome.MISSED)
         is CaptureResult.Invalid -> CapturedItem(result.name, result.name, CaptureOutcome.INVALID)
-        is CaptureResult.Captured -> try {
+        is CaptureResult.Captured -> {
             val info = result.info
             val name = "${info.packageId}-${info.version ?: "0"}.${info.kind.extension}".replace(UNSAFE_NAME, "_")
             val outcome = when {
+                folder == null -> CaptureOutcome.NOT_SAVED
                 name in savedByCapture || _state.value.files.any { it.name.equals(name, ignoreCase = true) } -> CaptureOutcome.ALREADY_THERE
-                !platform.saveToFolder(folder, name, result.file) -> CaptureOutcome.NOT_SAVED
+                // Document providers report a full or removed card and the like with runtime exceptions
+                !runCatching { platform.saveToFolder(folder, name, result.file) }.getOrDefault(false) -> CaptureOutcome.NOT_SAVED
                 else -> {
                     savedByCapture += name
-                    if (result.storeSigned) CaptureOutcome.SAVED else CaptureOutcome.SAVED_UNSIGNED
+                    if (result.signature?.worthWarning == false) CaptureOutcome.SAVED else CaptureOutcome.SAVED_WARNING
                 }
             }
             CapturedItem(info.displayName ?: info.packageId, name, outcome)
-        } catch (e: IOException) {
-            CapturedItem(result.info.displayName ?: result.info.packageId, result.info.packageId, CaptureOutcome.NOT_SAVED)
-        } finally {
-            result.file.delete()
         }
     }
 
@@ -928,6 +942,17 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         val name = withContext(io) { deps.folderSource.displayName(uri) }
         val files = withContext(io) { deps.folderSource.scan(uri) }
         _state.update { it.copy(folderName = name, scanning = false, files = files, previews = emptyMap()) }
+        loadPreviews()
+    }
+
+    /** Lists the folder again, keeping what is selected and shown, when files were added to it from here. */
+    private suspend fun refreshFolder(uri: Uri) {
+        if (folders.load() != uri) return
+        val files = withContext(io) { deps.folderSource.scan(uri) }
+        _state.update { state ->
+            val known = files.map(PackageFile::uri).toSet() + state.incoming.map(PackageFile::uri)
+            state.copy(files = files, selected = state.selected.filter { it in known }.toSet())
+        }
         loadPreviews()
     }
 

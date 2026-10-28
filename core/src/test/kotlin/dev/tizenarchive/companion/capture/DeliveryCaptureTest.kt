@@ -3,7 +3,10 @@ package dev.tizenarchive.companion.capture
 import dev.tizenarchive.companion.sdb.FakeSdbd
 import dev.tizenarchive.companion.sdb.JcaSdbSigner
 import dev.tizenarchive.companion.sdb.SdbOptions
+import dev.tizenarchive.companion.sdb.SdbError
+import dev.tizenarchive.companion.sdb.SdbException
 import dev.tizenarchive.companion.sdb.SdbSession
+import dev.tizenarchive.companion.signature.SignatureVerdict
 import dev.tizenarchive.companion.tizen.TizenPackageKind
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -15,8 +18,8 @@ import java.util.zip.ZipOutputStream
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -50,18 +53,20 @@ class DeliveryCaptureTest {
 
     private fun storeName(size: Int) = "tizenapp_1793213454602_samsungapps-000003107455-$size-100100006.wgt"
 
+    private fun DeliveryCapture.pollAll(onReceiving: (List<Delivery>) -> Unit = {}): List<CaptureResult> =
+        mutableListOf<CaptureResult>().also { results -> poll(onReceiving) { results += it } }
+
     @Test
-    fun `a complete store delivery is copied, read and checked for the distributor signature`() {
+    fun `a complete store delivery is copied and read`() {
         val bytes = tpk("com.example.app", "1.2.3")
         watch.files["$dir/HostStatus.xml"] = ByteArray(10)
         watch.files["$dir/${storeName(bytes.size)}"] = bytes
         session().use { session ->
-            val results = DeliveryCapture(session, work).poll()
+            val results = DeliveryCapture(session, work).pollAll()
             val captured = assertInstanceOf(CaptureResult.Captured::class.java, results.single())
             assertEquals("com.example.app", captured.info.packageId)
             assertEquals("1.2.3", captured.info.version)
             assertEquals(TizenPackageKind.TPK, captured.info.kind)
-            assertTrue(captured.storeSigned)
             assertArrayEquals(bytes, captured.file.readBytes())
         }
         assertEquals(listOf("$dir/${storeName(bytes.size)}"), watch.pulls)
@@ -75,28 +80,74 @@ class DeliveryCaptureTest {
         session().use { session ->
             val capture = DeliveryCapture(session, work)
             val seen = mutableListOf<Delivery>()
-            assertTrue(capture.poll { seen += it }.isEmpty())
+            assertTrue(capture.pollAll { seen += it }.isEmpty())
             assertEquals(listOf(Delivery(name, 10, bytes.size.toLong())), seen)
             watch.files["$dir/$name"] = bytes
-            assertInstanceOf(CaptureResult.Captured::class.java, capture.poll().single())
-            assertTrue(capture.poll().isEmpty())
+            assertInstanceOf(CaptureResult.Captured::class.java, capture.pollAll().single())
+            assertTrue(capture.pollAll().isEmpty())
         }
     }
 
     @Test
-    fun `a package without the distributor signature is captured but marked`() {
+    fun `a package without the distributor signature is captured with that verdict`() {
         val bytes = tpk("com.example.app", "1.0", signed = false)
         watch.files["$dir/${storeName(bytes.size)}"] = bytes
         session().use { session ->
-            assertFalse((DeliveryCapture(session, work).poll().single() as CaptureResult.Captured).storeSigned)
+            val captured = DeliveryCapture(session, work).pollAll().single() as CaptureResult.Captured
+            assertEquals(SignatureVerdict.UNSIGNED, captured.signature?.verdict)
         }
+    }
+
+    @Test
+    fun `an incomplete companion file is offered again instead of being reported`() {
+        watch.files["$dir/watcher.tpk"] = ByteArray(7)
+        session().use { session ->
+            val capture = DeliveryCapture(session, work)
+            assertTrue(capture.pollAll().isEmpty())
+            // Same size twice: copied, unreadable, so not reported and watched again
+            assertTrue(capture.pollAll().isEmpty())
+            watch.files["$dir/watcher.tpk"] = tpk("com.example.app", "1.0")
+            assertTrue(capture.pollAll().isEmpty())
+            assertInstanceOf(CaptureResult.Captured::class.java, capture.pollAll().single())
+        }
+        assertEquals(listOf("$dir/watcher.tpk", "$dir/watcher.tpk"), watch.pulls)
+    }
+
+    @Test
+    fun `a delivery copied before the connection broke is still reported`() {
+        val bytes = tpk("com.example.app", "1.0")
+        val service = BreakingService(listOf(storeName(bytes.size), storeName(bytes.size + 1).replace("-100100006", "-7")), bytes)
+        val results = mutableListOf<CaptureResult>()
+        assertThrows(SdbException::class.java) { DeliveryCapture(service, work).poll { results += it } }
+        assertInstanceOf(CaptureResult.Captured::class.java, results.single())
+    }
+
+    /** Lists two complete files, hands out the first and breaks on the second. */
+    private class BreakingService(private val names: List<String>, private val bytes: ByteArray) : dev.tizenarchive.companion.sdb.SdbService {
+        override val banner = "device::SM-R800::0"
+
+        override fun shell(command: String, onLine: (String) -> Unit) = ""
+
+        override fun push(remotePath: String, data: java.io.InputStream, mode: Int, progress: (Long) -> Unit) = Unit
+
+        override fun list(remoteDir: String) = names.mapIndexed { i, name ->
+            dev.tizenarchive.companion.sdb.RemoteEntry(name, bytes.size.toLong() + i, 0x81a4, 0)
+        }
+
+        override fun pull(remotePath: String, out: java.io.OutputStream, maxBytes: Long): Boolean {
+            if (remotePath.endsWith(names[1])) throw SdbException(SdbError.DISCONNECTED, "gone")
+            out.write(bytes)
+            return true
+        }
+
+        override fun close() = Unit
     }
 
     @Test
     fun `a file that is not a package is invalid and leaves nothing behind`() {
         watch.files["$dir/${storeName(5)}"] = ByteArray(5)
         session().use { session ->
-            assertInstanceOf(CaptureResult.Invalid::class.java, DeliveryCapture(session, work).poll().single())
+            assertInstanceOf(CaptureResult.Invalid::class.java, DeliveryCapture(session, work).pollAll().single())
         }
         assertTrue(work.listFiles().orEmpty().isEmpty())
     }
@@ -105,7 +156,7 @@ class DeliveryCaptureTest {
     fun `a file removed between listing and copying is missed`() {
         val bytes = tpk("com.example.app", "1.0")
         val capture = DeliveryCapture(GoneService(storeName(bytes.size), bytes.size.toLong()), work)
-        assertInstanceOf(CaptureResult.Missed::class.java, capture.poll().single())
+        assertInstanceOf(CaptureResult.Missed::class.java, capture.pollAll().single())
         assertTrue(work.listFiles().orEmpty().isEmpty())
     }
 
