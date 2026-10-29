@@ -126,11 +126,6 @@ Galaxy Wearable way:
 - `app`: Compose UI, Storage Access Framework folder scan, Android Keystore signing key, `PackageInstaller` queue, and
   the Wi-Fi way (`wifi` package: Keystore host key, network binding that avoids VPNs, settings and history).
 
-Design notes (in Russian) are in the sibling `tizen-docs` of the workspace: `spec-android-companion-installer.md`,
-`spike-s1-s2-results.md` and `plan-android-companion-installer.md` for the Galaxy Wearable way, and
-`spec-wifi-install-mode.md` and `spike-wifi-sdb-results.md` for the Wi-Fi way (`spike-bt-sdb-results.md` records why
-`sdb` over Bluetooth does not work).
-
 ## Build
 
 ```
