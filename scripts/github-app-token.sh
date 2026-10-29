@@ -13,7 +13,7 @@ if [ "${1:-}" = "--jwt" ]; then
     mode=jwt
     shift
 fi
-repo=${1:-Tizen-Archive/tizen-companion-installer}
+repo=${1:-Tizen-Archive/tizen-archive-android}
 client_id=${GITHUB_APP_CLIENT_ID:?set GITHUB_APP_CLIENT_ID (the client ID on the app settings page)}
 key=${GITHUB_APP_KEY:?set GITHUB_APP_KEY (path to the private key .pem)}
 
