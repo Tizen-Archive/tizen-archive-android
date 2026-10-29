@@ -11,7 +11,7 @@ WebSite: https://tizen-archive.com
 SourceCode: https://github.com/Tizen-Archive/tizen-companion-installer
 IssueTracker: https://github.com/Tizen-Archive/tizen-companion-installer/issues
 
-AutoName: Tizen Companion Installer
+AutoName: Tizen Archive
 
 RepoType: git
 Repo: https://github.com/Tizen-Archive/tizen-companion-installer.git

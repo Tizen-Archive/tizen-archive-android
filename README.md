@@ -1,9 +1,9 @@
-# Tizen Companion Installer
+# Tizen Archive for Android
 
 [![check](https://github.com/Tizen-Archive/tizen-companion-installer/actions/workflows/check.yml/badge.svg)](https://github.com/Tizen-Archive/tizen-companion-installer/actions/workflows/check.yml)
 
-Android app that installs Tizen watch packages (`.wgt`, `.tpk`) on a Samsung Galaxy Watch or Gear watch, without a
-computer. It has two ways of sending, chosen with a switch at the top of the screen:
+Android app of the [Tizen Archive](https://tizen-archive.com) project (named Tizen Companion Installer up to 0.3.0)
+that installs Tizen watch packages (`.wgt`, `.tpk`) on a Samsung Galaxy Watch or Gear watch, without a computer. It has two ways of sending, chosen with a switch at the top of the screen:
 
 - **Galaxy Wearable** (no developer mode needed). For every package the app builds a tiny code-free companion APK that
   carries the package in `assets/`, signs it with a key kept in the Android Keystore and asks Android to install it.

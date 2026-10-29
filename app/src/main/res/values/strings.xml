@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Tizen Companion Installer</string>
+    <string name="app_name">Tizen Archive</string>
     <string name="choose_folder">Choose folder</string>
     <string name="change_folder">Change folder</string>
     <string name="no_folder">Choose a folder with .wgt and .tpk files</string>

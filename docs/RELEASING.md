@@ -54,7 +54,7 @@ of users helps (release downloads, the "Android app" line in the Tizen Archive d
    `CurrentVersion`, `CurrentVersionCode`. Normalize it with `fdroid rewritemeta`, run `fdroid lint` and the local
    build below, then `apksigcopier compare <github apk> --unsigned <fdroid-built apk>`.
 3. Sync the fork `gitlab.com/tizen-archive/fdroiddata` with upstream, update the branch `dev.tizenarchive.companion`
-   (`metadata/dev.tizenarchive.companion.yml`, committed as "New app: Tizen Companion Installer" by Tizen Archive) and
+   (`metadata/dev.tizenarchive.companion.yml`, committed as "New app: Tizen Archive" by Tizen Archive) and
    re-open !53448 or open a new MR. Text for the description: `docs/fdroid/merge-request.md`; add the development
    history, the releases and the evidence of users.
 4. GitLab asks the fork for identity verification (phone or card) before it runs CI; do not submit anything, the
