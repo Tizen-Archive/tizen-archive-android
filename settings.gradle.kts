@@ -1,4 +1,4 @@
-rootProject.name = "tizen-companion-installer"
+rootProject.name = "tizen-archive-android"
 
 pluginManagement {
     repositories {

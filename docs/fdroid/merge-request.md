@@ -23,7 +23,7 @@ asks Android to install it; Samsung's Gear Plugin then delivers the package to t
 handle the "Install on the watch" link of the Tizen Archive catalog (https://tizen-archive.com) and verifies the
 downloaded file (SHA-256 and size) before installing it.
 
-Source: https://github.com/Tizen-Archive/tizen-companion-installer (Apache-2.0). Screenshots are in the repository
+Source: https://github.com/Tizen-Archive/tizen-archive-android (Apache-2.0). Screenshots are in the repository
 (`fastlane/metadata/android/*/images/phoneScreenshots`).
 
 ## Why this app

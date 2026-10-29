@@ -8,15 +8,15 @@ License: Apache-2.0
 AuthorName: Tizen Archive
 AuthorEmail: developer@tizen-archive.com
 WebSite: https://tizen-archive.com
-SourceCode: https://github.com/Tizen-Archive/tizen-companion-installer
-IssueTracker: https://github.com/Tizen-Archive/tizen-companion-installer/issues
+SourceCode: https://github.com/Tizen-Archive/tizen-archive-android
+IssueTracker: https://github.com/Tizen-Archive/tizen-archive-android/issues
 
 AutoName: Tizen Archive
 
 RepoType: git
-Repo: https://github.com/Tizen-Archive/tizen-companion-installer.git
+Repo: https://github.com/Tizen-Archive/tizen-archive-android.git
 Binaries: 
-  https://github.com/Tizen-Archive/tizen-companion-installer/releases/download/v%v/tizen-companion-installer-%v.apk
+  https://github.com/Tizen-Archive/tizen-archive-android/releases/download/v%v/tizen-archive-android-%v.apk
 
 Builds:
   - versionName: 0.1.1

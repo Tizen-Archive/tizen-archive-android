@@ -1,0 +1,1 @@
+Tizen Companion Installer is now called Tizen Archive, after the project whose install links it opens, and has a new icon. It updates in place, and nothing else changes.
