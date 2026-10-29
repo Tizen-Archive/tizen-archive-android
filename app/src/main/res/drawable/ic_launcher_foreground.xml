@@ -1,22 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The Tizen Archive mark (brand/mark.svg in the tizen-archive repository), scaled into the 66 dp safe zone -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0" />
-    <path
-        android:fillColor="#1B5E7B"
-        android:pathData="M54,54m-15,0a15,15 0,1 1,30 0a15,15 0,1 1,-30 0" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M53,44h2v10.5l6.5,3.8l-1,1.7l-7.5,-4.4z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,28h16v6h-16z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,74h16v6h-16z" />
+    <group
+        android:scaleX="1.35"
+        android:scaleY="1.35"
+        android:translateX="21.6"
+        android:translateY="21.26">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M9.2,9h29.6a2.2,2.2 0,0 1,2.2 2.2v3.6a2.2,2.2 0,0 1,-2.2 2.2h-29.6a2.2,2.2 0,0 1,-2.2 -2.2v-3.6a2.2,2.2 0,0 1,2.2 -2.2z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M10,19h28v17.5a3,3 0,0 1,-3 3H13a3,3 0,0 1,-3 -3zM17,29.5a7,7 0,1 0,14 0a7,7 0,1 0,-14 0z" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M24,25.6v4l2.8,1.9" />
+    </group>
 </vector>

@@ -27,8 +27,8 @@ A release is attributed to the account whose token creates it. To publish it as 
 export GITHUB_APP_CLIENT_ID=Iv23...            # client ID on the app settings page
 export GITHUB_APP_KEY=~/.config/tizen-companion-installer/github-app.pem
 GH_TOKEN=$(scripts/github-app-token.sh) gh release create v<version> \
-  tizen-companion-installer-<version>.apk tizen-companion-installer-<version>.apk.sha256 \
-  -R Tizen-Archive/tizen-companion-installer --verify-tag --title "..." --notes-file notes.md
+  tizen-archive-android-<version>.apk tizen-archive-android-<version>.apk.sha256 \
+  -R Tizen-Archive/tizen-archive-android --verify-tag --title "..." --notes-file notes.md
 ```
 
 The app needs only the repository permission "Contents: Read and write" and must be installed on this repository.
