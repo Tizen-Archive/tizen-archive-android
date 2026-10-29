@@ -6,7 +6,7 @@ new one, from late January 2027. Before that update the recipe (see `docs/RELEAS
 this text: replace the version and commit below, add the development history, the list of releases and any evidence of
 users.
 
-Title: `New app: Tizen Companion Installer`
+Title: `New app: Tizen Archive`
 
 Label: `~"New App"` (added by the template). Branch: `dev.tizenarchive.companion`. One file added:
 `metadata/dev.tizenarchive.companion.yml` (copy of `dev.tizenarchive.companion.yml` next to this file).
@@ -16,7 +16,7 @@ Body (paste into the "App inclusion" template):
 ```markdown
 ## Abstract
 
-Tizen Companion Installer installs Tizen watch packages (.wgt and .tpk) on Samsung Galaxy Watch / Gear watches
+Tizen Archive installs Tizen watch packages (.wgt and .tpk) on Samsung Galaxy Watch / Gear watches
 through the Galaxy Wearable app, without a computer and without developer mode on the watch. For every package it
 builds a tiny code-free helper app that carries the package, signs it with a key kept in the Android Keystore and
 asks Android to install it; Samsung's Gear Plugin then delivers the package to the watch over Bluetooth. It can also

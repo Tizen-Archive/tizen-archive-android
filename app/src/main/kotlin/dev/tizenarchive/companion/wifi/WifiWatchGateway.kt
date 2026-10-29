@@ -168,7 +168,7 @@ internal class WifiWatchGateway(
     }
 
     /** The name the watch shows next to the key; plain ASCII because the key line is sent as such. */
-    private fun keyName(): String = "${Build.MODEL}@tizen-companion".map { if (it.code in 0x21..0x7e) it else '_' }.joinToString("")
+    private fun keyName(): String = "${Build.MODEL}@tizen-archive".map { if (it.code in 0x21..0x7e) it else '_' }.joinToString("")
 
     private companion object {
         const val SDB_PORT = 26101
