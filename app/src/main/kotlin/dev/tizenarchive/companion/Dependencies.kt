@@ -30,6 +30,8 @@ import dev.tizenarchive.companion.notify.QueueNotifications
 import dev.tizenarchive.companion.notify.QueueNotifier
 import dev.tizenarchive.companion.notify.QueueProgress
 import dev.tizenarchive.companion.notify.QueueProgressNotifier
+import dev.tizenarchive.companion.release.AppReleaseApi
+import dev.tizenarchive.companion.release.GitHubReleaseClient
 import dev.tizenarchive.companion.signing.KeystoreSigningKey
 import dev.tizenarchive.companion.wifi.KeystoreSdbKey
 import dev.tizenarchive.companion.wifi.WatchGateway
@@ -51,7 +53,16 @@ internal const val LOCAL_NETWORK_API = 37
 internal interface Platform {
     val cacheDir: File
 
+    /** The version of this app. */
+    val appVersion: String
+
     fun canRequestPackageInstalls(): Boolean
+
+    /** False for debug builds, which have their own package name, and for installs that a store client keeps up to date. */
+    fun canUpdateItself(): Boolean
+
+    /** Whether the APK [file] is this app and not another one. */
+    fun isOwnPackage(file: File): Boolean
 
     /** Since Android 17 the local network, where the watch is, is closed to apps without this permission. */
     fun hasLocalNetworkAccess(): Boolean
@@ -80,7 +91,23 @@ internal interface Platform {
 internal class AndroidPlatform(private val context: Context) : Platform {
     override val cacheDir: File get() = context.cacheDir
 
+    override val appVersion: String get() = BuildConfig.VERSION_NAME
+
     override fun canRequestPackageInstalls(): Boolean = context.packageManager.canRequestPackageInstalls()
+
+    override fun canUpdateItself(): Boolean = !BuildConfig.DEBUG && installerPackage() !in STORE_CLIENTS
+
+    @Suppress("DEPRECATION")
+    private fun installerPackage(): String? = runCatching {
+        val manager = context.packageManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            manager.getInstallSourceInfo(context.packageName).installingPackageName
+        } else {
+            manager.getInstallerPackageName(context.packageName)
+        }
+    }.getOrNull()
+
+    override fun isOwnPackage(file: File): Boolean = context.packageManager.getPackageArchiveInfo(file.path, 0)?.packageName == context.packageName
 
     override fun hasLocalNetworkAccess(): Boolean =
         Build.VERSION.SDK_INT < LOCAL_NETWORK_API ||
@@ -128,6 +155,18 @@ internal class AndroidPlatform(private val context: Context) : Platform {
         }
         return true
     }
+
+    private companion object {
+        /** Clients of F-Droid repositories: the same signed APK comes through them, and they do the updating. */
+        val STORE_CLIENTS = setOf(
+            "org.fdroid.fdroid",
+            "org.fdroid.basic",
+            "org.fdroid.fdroid.privileged",
+            "com.looker.droidify",
+            "com.machiav3lli.fdroid",
+            "nya.kitsunyan.foxydroid",
+        )
+    }
 }
 
 internal class ContentFolderSource(private val resolver: ContentResolver) : FolderSource {
@@ -151,6 +190,7 @@ internal class Dependencies(
     val watch: WatchGateway,
     val watchSettings: WatchSettingsMemory,
     val watchHistory: WatchHistoryMemory,
+    val releases: AppReleaseApi,
     val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     companion object {
@@ -175,6 +215,7 @@ internal class Dependencies(
                 watch = WifiWatchGateway(application, KeystoreSdbKey()),
                 watchSettings = WatchSettingsStore(application),
                 watchHistory = WatchHistoryStore(application),
+                releases = GitHubReleaseClient("tizen-companion-installer/${BuildConfig.VERSION_NAME}"),
             )
         }
     }

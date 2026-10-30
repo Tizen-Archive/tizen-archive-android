@@ -46,8 +46,10 @@ Both ways install only what the watch's own package manager accepts (a valid sto
   runs and a notification reports its end. While a queue runs a foreground service keeps the app alive when you switch
   away, with a progress notification (and Cancel); when the app is in the background, Android's install confirmation
   arrives as a notification you tap, because Android does not let a background app open windows.
-- No ads, analytics or trackers. The internet is used only for the catalog link above and for the update checks you
-  start. The Wi-Fi way connects only to the watch in your local network (a private address you type or find with
+- The setup sheet checks GitHub Releases for a new version of this app when you tap the button and, after you confirm,
+  downloads it, verifies its checksum and hands it to Android. The button is hidden when an F-Droid client installed the app.
+- No ads, analytics or trackers. The internet is used only for the catalog link above, for the update checks you start
+  and, for the app's own update, for GitHub. The Wi-Fi way connects only to the watch in your local network (a private address you type or find with
   the button, port 26101) and never to anything else.
 - English and Russian interface.
 

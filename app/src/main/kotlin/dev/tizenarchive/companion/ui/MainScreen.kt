@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -351,6 +353,8 @@ internal fun MainContent(state: UiState, actions: MainActions, onPickFolder: () 
         WatchRemovalDialog(removal, onConfirm = actions::confirmWatchRemoval, onDismiss = actions::dismissWatchRemoval)
     }
 
+    AppUpdateDialog(state.appUpdate, state.installing, actions)
+
     if (state.needsInstallPermission) {
         AlertDialog(
             onDismissRequest = actions::dismissPermissionDialog,
@@ -468,6 +472,59 @@ private fun WatchTab(
             }
         }
     }
+}
+
+/** Shown once there is something to decide or to wait for; the check itself reports in the setup sheet. */
+@Composable
+private fun AppUpdateDialog(update: AppUpdateState, installing: Boolean, actions: MainActions) {
+    val title = when (update) {
+        is AppUpdateState.Available -> stringResource(R.string.app_update_available, update.release.version)
+        is AppUpdateState.Downloading -> stringResource(R.string.app_update_available, update.release.version)
+        is AppUpdateState.Installing -> stringResource(R.string.app_update_available, update.release.version)
+        is AppUpdateState.Failed -> stringResource(R.string.app_update_failed)
+        else -> return
+    }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(title) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (update) {
+                    is AppUpdateState.Available -> {
+                        Text(stringResource(R.string.app_update_size, formatSize(update.release.size)))
+                        if (update.release.notes.isNotEmpty()) Text(update.release.notes, style = MaterialTheme.typography.bodySmall)
+                        if (installing) Text(stringResource(R.string.app_update_busy), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    is AppUpdateState.Downloading -> Text(stringResource(R.string.state_downloading, update.percent))
+                    is AppUpdateState.Installing -> Text(stringResource(R.string.app_update_installing))
+                    is AppUpdateState.Failed -> Text(appUpdateProblem(update))
+                }
+            }
+        },
+        confirmButton = {
+            if (update is AppUpdateState.Available) {
+                TextButton(onClick = actions::installAppUpdate, enabled = !installing) { Text(stringResource(R.string.app_update_install)) }
+            } else if (update is AppUpdateState.Failed) {
+                TextButton(onClick = actions::dismissAppUpdate) { Text(stringResource(R.string.setup_done)) }
+            }
+        },
+        dismissButton = {
+            // An unanswered confirmation of Android never reports back, so waiting for it must not lock the app
+            if (update !is AppUpdateState.Failed) {
+                TextButton(onClick = actions::dismissAppUpdate) { Text(stringResource(R.string.cancel)) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun appUpdateProblem(failed: AppUpdateState.Failed): String = when (failed.problem) {
+    AppUpdateProblem.NETWORK -> stringResource(R.string.app_update_problem_network)
+    AppUpdateProblem.RATE_LIMITED -> stringResource(R.string.app_update_problem_limit)
+    AppUpdateProblem.BAD_RESPONSE -> stringResource(R.string.app_update_problem_response)
+    AppUpdateProblem.CORRUPTED -> stringResource(R.string.app_update_problem_corrupted)
+    AppUpdateProblem.NOT_THIS_APP -> stringResource(R.string.app_update_problem_other_app)
+    AppUpdateProblem.INSTALL_FAILED -> stringResource(R.string.app_update_problem_install, failed.message.orEmpty())
 }
 
 @Composable

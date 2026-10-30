@@ -1,11 +1,11 @@
 package dev.tizenarchive.companion.catalog
 
+import dev.tizenarchive.companion.copyHashed
 import dev.tizenarchive.companion.readUpTo
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
-import java.security.MessageDigest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
@@ -86,26 +86,10 @@ public class CatalogClient(
         if (artifact.size > MAX_ARTIFACT_BYTES) throw CatalogException(CatalogError.TOO_LARGE, "The package is too large")
         try {
             open(path).use { connection ->
-                val digest = MessageDigest.getInstance("SHA-256")
-                var total = 0L
-                connection.inputStream.use { input ->
-                    destination.outputStream().buffered().use { output ->
-                        val buffer = ByteArray(BUFFER)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            total += read
-                            if (total > artifact.size) break
-                            digest.update(buffer, 0, read)
-                            output.write(buffer, 0, read)
-                            progress(total)
-                        }
-                    }
-                }
+                val (total, actual) = connection.inputStream.use { copyHashed(it, destination, artifact.size, progress) }
                 if (total != artifact.size) {
                     throw CatalogException(CatalogError.SIZE_MISMATCH, "Expected ${artifact.size} bytes, got $total")
                 }
-                val actual = digest.digest().joinToString("") { "%02x".format(it) }
                 if (!actual.equals(artifact.sha256, ignoreCase = true)) {
                     throw CatalogException(CatalogError.CHECKSUM_MISMATCH, "SHA-256 mismatch")
                 }
@@ -167,7 +151,6 @@ public class CatalogClient(
         const val READ_TIMEOUT_MS = 30_000
         const val MAX_JSON_BYTES = 5 * 1024 * 1024
         const val MAX_ARTIFACT_BYTES = 512L * 1024 * 1024
-        const val BUFFER = 64 * 1024
 
         /** As many ids as the catalog takes in one lookup. */
         const val LOOKUP_CHUNK = 100

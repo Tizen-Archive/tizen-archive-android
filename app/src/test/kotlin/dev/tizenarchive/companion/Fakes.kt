@@ -76,7 +76,15 @@ internal class FakePlatform(
     val contents = mutableMapOf<Uri, ByteArray>()
     val names = mutableMapOf<Uri, String>()
 
+    override val appVersion = "0.3.1"
+    var updatable = true
+    var ownPackage = true
+
     override fun canRequestPackageInstalls() = canInstall
+
+    override fun canUpdateItself() = updatable
+
+    override fun isOwnPackage(file: File) = ownPackage
 
     override fun hasLocalNetworkAccess() = localNetwork
 
@@ -131,11 +139,13 @@ internal class FakeInstaller(private val clock: () -> Long) : Installer {
 
     /** Suspends the install until completed, to test cancellation and the "waiting for confirmation" state. */
     var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    var failure: Exception? = null
 
     override suspend fun install(apk: File): InstallOutcome {
         val name = apk.nameWithoutExtension
         installs += Call(name, clock())
         gate?.await()
+        failure?.let { throw it }
         return outcomes.removeFirstOrNull() ?: InstallOutcome.Installed(name)
     }
 
@@ -310,6 +320,28 @@ internal class FakeWatch : WatchGateway {
         events.forEach(progress)
         gate?.await()
         return outcomes.removeFirstOrNull() ?: WatchOutcome.Installed
+    }
+}
+
+internal class FakeReleases : dev.tizenarchive.companion.release.AppReleaseApi {
+    var latest = dev.tizenarchive.companion.release.AppRelease("0.4.0", "Fixes", 100, "0".repeat(64), "https://github.com/x.apk")
+    var failure: Exception? = null
+    var downloadFailure: Exception? = null
+    var checks = 0
+    var downloads = 0
+
+    override fun latest(): dev.tizenarchive.companion.release.AppRelease {
+        checks++
+        failure?.let { throw it }
+        return latest
+    }
+
+    override fun download(release: dev.tizenarchive.companion.release.AppRelease, destination: File, progress: (Long) -> Unit) {
+        downloads++
+        downloadFailure?.let { throw it }
+        destination.writeBytes(ByteArray(10))
+        progress(50)
+        progress(100)
     }
 }
 

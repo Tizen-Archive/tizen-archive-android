@@ -119,6 +119,19 @@ internal fun SendHeader(state: UiState, actions: MainActions, modifier: Modifier
     if (showSetup) SetupSheet(state, actions, onClose = { showSetup = false })
 }
 
+@Composable
+private fun AppUpdateRow(state: UiState, actions: MainActions) {
+    if (!state.canUpdateApp) return
+    val checking = state.appUpdate == AppUpdateState.Checking
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedButton(onClick = actions::checkAppUpdate, enabled = !checking) {
+            Text(stringResource(if (checking) R.string.app_update_checking else R.string.app_update_check))
+        }
+        val note = if (state.appUpdate == AppUpdateState.UpToDate) R.string.app_update_latest else R.string.app_update_current
+        Text(stringResource(note, state.appVersion), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 /** The setup behind the status line. It scrolls, keeps clear of the keyboard and has its own close button besides swiping and the back key. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -170,6 +183,7 @@ private fun SetupSheet(state: UiState, actions: MainActions, onClose: () -> Unit
                 if (state.missing.isNotEmpty()) MissingCard(state.missing)
                 Text(stringResource(R.string.mode_companion_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            AppUpdateRow(state, actions)
             Button(
                 onClick = { scope.launch { sheet.hide() }.invokeOnCompletion { onClose() } },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),

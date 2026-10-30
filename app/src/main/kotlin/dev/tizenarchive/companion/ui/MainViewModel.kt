@@ -25,6 +25,9 @@ import dev.tizenarchive.companion.files.PackagePreview
 import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.UninstallOutcome
 import dev.tizenarchive.companion.notify.ProgressInfo
+import dev.tizenarchive.companion.release.AppRelease
+import dev.tizenarchive.companion.release.ReleaseError
+import dev.tizenarchive.companion.release.ReleaseException
 import dev.tizenarchive.companion.sdb.InstallProgress
 import dev.tizenarchive.companion.sdb.PackageOrigin
 import dev.tizenarchive.companion.sdb.PackageType
@@ -89,6 +92,9 @@ internal interface MainActions {
     fun dismissWatchRemoval()
     fun startCapture()
     fun stopCapture()
+    fun checkAppUpdate()
+    fun installAppUpdate()
+    fun dismissAppUpdate()
 }
 
 /** The key under which the state of sending a companion again is kept (the list items use their file URI). */
@@ -206,6 +212,21 @@ internal sealed interface UpdateCheck {
     data class Done(val checked: Int, val failed: Int) : UpdateCheck
 }
 
+internal enum class AppUpdateProblem { NETWORK, RATE_LIMITED, BAD_RESPONSE, CORRUPTED, NOT_THIS_APP, INSTALL_FAILED }
+
+/** The update of this app from its releases; it starts with a tap and installs after a second one. */
+internal sealed interface AppUpdateState {
+    data object Idle : AppUpdateState
+    data object Checking : AppUpdateState
+    data object UpToDate : AppUpdateState
+    data class Available(val release: AppRelease) : AppUpdateState
+    data class Downloading(val release: AppRelease, val percent: Int) : AppUpdateState
+
+    /** Android is installing it or asks the user to confirm; on success it replaces the app, which ends this process. */
+    data class Installing(val release: AppRelease) : AppUpdateState
+    data class Failed(val problem: AppUpdateProblem, val message: String? = null) : AppUpdateState
+}
+
 /** Things the app needs on the phone and cannot find. */
 internal enum class Missing { GALAXY_WEARABLE, GEAR_PLUGIN, INSTALL_PERMISSION }
 
@@ -298,6 +319,9 @@ internal data class UiState(
     val watchKind: WatchKindFilter = WatchKindFilter.ALL,
     val watchRemoval: WatchRemoval? = null,
     val capture: CaptureState = CaptureState(),
+    val appVersion: String = "",
+    val canUpdateApp: Boolean = false,
+    val appUpdate: AppUpdateState = AppUpdateState.Idle,
     /** Packages this app put on the watch; only these can be removed from the app. */
     val remembered: List<RememberedPackage> = emptyList(),
 ) {
@@ -366,8 +390,10 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                 workDir.deleteRecursively()
                 File(platform.cacheDir, INCOMING_DIR).deleteRecursively()
                 File(platform.cacheDir, CAPTURE_DIR).deleteRecursively()
+                File(platform.cacheDir, APP_UPDATE_DIR).deleteRecursively()
             }
         }
+        _state.update { it.copy(appVersion = platform.appVersion, canUpdateApp = platform.canUpdateItself()) }
         viewModelScope.launch {
             cleanup.join()
             folders.load()?.let { openFolder(it) }
@@ -956,6 +982,103 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         }
     }
 
+    // ---- This app's own update -------------------------------------------------------------------------
+
+    /** Asks GitHub for the latest release; runs only when the user taps the button. */
+    override fun checkAppUpdate() {
+        val current = _state.value
+        if (!current.canUpdateApp || current.appUpdate is AppUpdateState.Checking || current.appUpdate.isWorking()) return
+        _state.update { it.copy(appUpdate = AppUpdateState.Checking) }
+        viewModelScope.launch {
+            val next = try {
+                val release = withContext(io) { deps.releases.latest() }
+                if (VersionCompare.isNewer(release.version, platform.appVersion)) AppUpdateState.Available(release) else AppUpdateState.UpToDate
+            } catch (e: ReleaseException) {
+                AppUpdateState.Failed(e.problem(), e.message)
+            }
+            _state.update { it.copy(appUpdate = next) }
+        }
+    }
+
+    /** The second tap. Android then asks once more and replaces the app, which only an APK with the same signature can do. */
+    override fun installAppUpdate() {
+        val current = _state.value
+        val release = (current.appUpdate as? AppUpdateState.Available)?.release ?: return
+        if (current.installing) return
+        if (!platform.canRequestPackageInstalls()) {
+            _state.update { it.copy(needsInstallPermission = true) }
+            return
+        }
+        val dir = File(platform.cacheDir, APP_UPDATE_DIR)
+        val apk = File(dir, "update.apk")
+        position = Triple(1, 1, "Tizen Archive ${release.version}")
+        _state.update { it.copy(installing = true, appUpdate = AppUpdateState.Downloading(release, 0)) }
+        // A running capture has the notification and its service, which keeps this process alive too
+        val notify = !current.capture.running
+        if (notify) report(ItemState.Downloading(0))
+        job = viewModelScope.launch {
+            var next: AppUpdateState = AppUpdateState.Idle
+            try {
+                withContext(io) {
+                    dir.mkdirs()
+                    val running = coroutineContext
+                    var lastPercent = 0
+                    deps.releases.download(release, apk) { done ->
+                        running.ensureActive()
+                        val percent = (done * 100 / release.size).toInt()
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            _state.update { it.copy(appUpdate = AppUpdateState.Downloading(release, percent)) }
+                            if (notify) report(ItemState.Downloading(percent))
+                        }
+                    }
+                }
+                if (!withContext(io) { platform.isOwnPackage(apk) }) {
+                    next = AppUpdateState.Failed(AppUpdateProblem.NOT_THIS_APP)
+                    return@launch
+                }
+                _state.update { it.copy(appUpdate = AppUpdateState.Installing(release)) }
+                if (notify) report(ItemState.AwaitingConfirm)
+                next = when (val outcome = deps.installer.install(apk)) {
+                    is InstallOutcome.Installed -> AppUpdateState.Idle
+                    InstallOutcome.Declined -> AppUpdateState.Available(release)
+                    is InstallOutcome.Failed -> AppUpdateState.Failed(AppUpdateProblem.INSTALL_FAILED, outcome.message)
+                }
+            } catch (e: ReleaseException) {
+                next = AppUpdateState.Failed(e.problem(), e.message)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                next = AppUpdateState.Failed(AppUpdateProblem.INSTALL_FAILED, e.message)
+            } finally {
+                // Coming back from another dispatcher would throw in a cancelled job and skip what follows
+                withContext(NonCancellable) {
+                    withContext(io) { dir.deleteRecursively() }
+                    _state.update { it.copy(installing = false, appUpdate = next) }
+                    if (notify) progress.stop()
+                }
+            }
+        }
+    }
+
+    override fun dismissAppUpdate() {
+        val update = _state.value.appUpdate
+        if (update.isWorking()) {
+            job?.cancel()
+        } else {
+            _state.update { it.copy(appUpdate = AppUpdateState.Idle) }
+        }
+    }
+
+    private fun AppUpdateState.isWorking() = this is AppUpdateState.Downloading || this is AppUpdateState.Installing
+
+    private fun ReleaseException.problem() = when (error) {
+        ReleaseError.NETWORK -> AppUpdateProblem.NETWORK
+        ReleaseError.RATE_LIMITED -> AppUpdateProblem.RATE_LIMITED
+        ReleaseError.BAD_RESPONSE -> AppUpdateProblem.BAD_RESPONSE
+        ReleaseError.SIZE_MISMATCH, ReleaseError.CHECKSUM_MISMATCH -> AppUpdateProblem.CORRUPTED
+    }
+
     // ---- Link from the website ----------------------------------------------------------------------------
 
     fun onInstallLink(link: String) {
@@ -1018,7 +1141,8 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     }
 
     override fun dismissRemote() {
-        if (_state.value.installing) job?.cancel()
+        // Closing a notice such as "busy" must not stop whatever is running
+        if (_state.value.remote is RemoteState.Working) job?.cancel()
         _state.update { it.copy(remote = null) }
     }
 
@@ -1196,6 +1320,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         const val GEAR_PLUGIN = "com.samsung.android.geargplugin"
         const val INCOMING_DIR = "incoming"
         const val CAPTURE_DIR = "capture"
+        const val APP_UPDATE_DIR = "app-update"
         val UNSAFE_NAME = Regex("[^A-Za-z0-9._-]")
         const val MAX_INCOMING = 200
         const val MAX_PREVIEWS = 1000

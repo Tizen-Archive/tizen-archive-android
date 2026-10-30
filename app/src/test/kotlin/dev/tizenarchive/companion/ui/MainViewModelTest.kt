@@ -12,6 +12,7 @@ import dev.tizenarchive.companion.FakeInstaller
 import dev.tizenarchive.companion.FakeNotifier
 import dev.tizenarchive.companion.FakePlatform
 import dev.tizenarchive.companion.FakePreviews
+import dev.tizenarchive.companion.FakeReleases
 import dev.tizenarchive.companion.FakeWatch
 import dev.tizenarchive.companion.FakeWatchHistory
 import dev.tizenarchive.companion.FakeWatchSettings
@@ -102,6 +103,8 @@ class MainViewModelTest {
 
     private fun Dispatchers_setMain() = kotlinx.coroutines.Dispatchers.setMain(dispatcher)
 
+    private val releases = FakeReleases()
+
     private fun viewModel(folder: Uri? = tree) = MainViewModel(
         Dependencies(
             platform = platform,
@@ -117,6 +120,7 @@ class MainViewModelTest {
             watch = watch,
             watchSettings = settings,
             watchHistory = history,
+            releases = releases,
             io = dispatcher,
         ),
     )
@@ -655,7 +659,7 @@ class MainViewModelTest {
             Dependencies(
                 platform = platform, folders = FakeFolders(null), folderSource = source, installer = installer, companions = companions,
                 catalog = catalog, factory = FakeFactory(), previews = FakePreviews(), notifier = notifier, progress = progress,
-                watch = watch, watchSettings = FakeWatchSettings(WatchSettings(InstallMode.WIFI, "10.0.0.5")), watchHistory = FakeWatchHistory(), io = dispatcher,
+                watch = watch, watchSettings = FakeWatchSettings(WatchSettings(InstallMode.WIFI, "10.0.0.5")), watchHistory = FakeWatchHistory(), releases = releases, io = dispatcher,
             ),
         )
         dispatcher.scheduler.advanceUntilIdle()
@@ -1119,6 +1123,174 @@ class MainViewModelTest {
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(watch.calls.isEmpty())
         assertFalse(vm.state.value.installing)
+    }
+
+    private fun vmWithUpdate(): MainViewModel {
+        val vm = viewModel(folder = null)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.checkAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        return vm
+    }
+
+    @Test
+    fun `the app update is asked for only on a tap and is offered when newer`() {
+        val vm = viewModel(folder = null)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, releases.checks)
+        assertEquals("0.3.1", vm.state.value.appVersion)
+        vm.checkAppUpdate()
+        assertEquals(AppUpdateState.Checking, vm.state.value.appUpdate)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(AppUpdateState.Available(releases.latest), vm.state.value.appUpdate)
+        assertEquals(0, releases.downloads)
+    }
+
+    @Test
+    fun `the same or an older release means the app is up to date`() {
+        for (version in listOf("0.3.1", "0.3.0")) {
+            releases.latest = releases.latest.copy(version = version)
+            assertEquals(AppUpdateState.UpToDate, vmWithUpdate().state.value.appUpdate)
+        }
+    }
+
+    @Test
+    fun `an install from a store client does not check`() {
+        platform.updatable = false
+        val vm = vmWithUpdate()
+        assertFalse(vm.state.value.canUpdateApp)
+        assertEquals(0, releases.checks)
+    }
+
+    @Test
+    fun `a failed check names the problem`() {
+        val cases = mapOf(
+            dev.tizenarchive.companion.release.ReleaseError.NETWORK to AppUpdateProblem.NETWORK,
+            dev.tizenarchive.companion.release.ReleaseError.RATE_LIMITED to AppUpdateProblem.RATE_LIMITED,
+            dev.tizenarchive.companion.release.ReleaseError.BAD_RESPONSE to AppUpdateProblem.BAD_RESPONSE,
+        )
+        for ((error, problem) in cases) {
+            releases.failure = dev.tizenarchive.companion.release.ReleaseException(error, "x")
+            assertEquals(problem, (vmWithUpdate().state.value.appUpdate as AppUpdateState.Failed).problem)
+        }
+    }
+
+    @Test
+    fun `a confirmed update downloads, leaves the install to Android and cleans up`() {
+        val vm = vmWithUpdate()
+        vm.installAppUpdate()
+        assertTrue(vm.state.value.installing)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, releases.downloads)
+        assertEquals(1, installer.installs.size)
+        assertEquals(AppUpdateState.Idle, vm.state.value.appUpdate)
+        assertFalse(vm.state.value.installing)
+        assertFalse(File(platform.cacheDir, "app-update").exists())
+    }
+
+    @Test
+    fun `an update waits for the permission to install apps`() {
+        val vm = vmWithUpdate()
+        platform.canInstall = false
+        vm.installAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(vm.state.value.needsInstallPermission)
+        assertEquals(0, releases.downloads)
+        assertTrue(vm.state.value.appUpdate is AppUpdateState.Available)
+    }
+
+    @Test
+    fun `a file that is not this app is not installed`() {
+        val vm = vmWithUpdate()
+        platform.ownPackage = false
+        vm.installAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(AppUpdateProblem.NOT_THIS_APP, (vm.state.value.appUpdate as AppUpdateState.Failed).problem)
+        assertTrue(installer.installs.isEmpty())
+        assertFalse(vm.state.value.installing)
+    }
+
+    @Test
+    fun `a corrupted download is reported and installs nothing`() {
+        val vm = vmWithUpdate()
+        releases.downloadFailure = dev.tizenarchive.companion.release.ReleaseException(dev.tizenarchive.companion.release.ReleaseError.CHECKSUM_MISMATCH, "x")
+        vm.installAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(AppUpdateProblem.CORRUPTED, (vm.state.value.appUpdate as AppUpdateState.Failed).problem)
+        assertTrue(installer.installs.isEmpty())
+    }
+
+    @Test
+    fun `a failing system installer is reported, not a crash`() {
+        val vm = vmWithUpdate()
+        installer.failure = java.io.IOException("no space")
+        vm.installAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        val failed = vm.state.value.appUpdate as AppUpdateState.Failed
+        assertEquals(AppUpdateProblem.INSTALL_FAILED, failed.problem)
+        assertEquals("no space", failed.message)
+        assertFalse(vm.state.value.installing)
+    }
+
+    @Test
+    fun `waiting for the system confirmation can be given up`() {
+        val vm = vmWithUpdate()
+        installer.gate = kotlinx.coroutines.CompletableDeferred()
+        vm.installAppUpdate()
+        dispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value.appUpdate is AppUpdateState.Installing)
+        vm.dismissAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(AppUpdateState.Idle, vm.state.value.appUpdate)
+        assertFalse(vm.state.value.installing)
+        assertTrue(progress.stops > 0)
+    }
+
+    @Test
+    fun `an app update leaves a running capture alone`() {
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.startCapture()
+        dispatcher.scheduler.runCurrent()
+        vm.checkAppUpdate()
+        dispatcher.scheduler.runCurrent()
+        vm.installAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, releases.downloads)
+        assertTrue(vm.state.value.capture.running)
+        assertEquals(0, progress.stops)
+        assertTrue(progress.updates.isEmpty())
+        vm.stopCapture()
+        dispatcher.scheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `closing the busy notice does not stop what runs`() {
+        val vm = vmWithUpdate()
+        installer.gate = kotlinx.coroutines.CompletableDeferred()
+        vm.installAppUpdate()
+        dispatcher.scheduler.runCurrent()
+        vm.onInstallLink("tizen-archive://install?package=com.b")
+        vm.dismissRemote()
+        dispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value.appUpdate is AppUpdateState.Installing)
+        installer.gate!!.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `an update is not started while something else runs and a dismissal closes the offer`() {
+        val vm = vmWithUpdate()
+        vm.installAppUpdate()
+        vm.installAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, releases.downloads)
+
+        vm.checkAppUpdate()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.dismissAppUpdate()
+        assertEquals(AppUpdateState.Idle, vm.state.value.appUpdate)
     }
 
     @Test

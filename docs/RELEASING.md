@@ -99,3 +99,12 @@ GRADLE_USER_HOME=$(mktemp -d) ./gradlew --write-verification-metadata sha256 \
 ```
 
 and review the diff of `gradle/verification-metadata.xml`.
+
+## The app's own update
+
+The setup sheet reads the latest GitHub release. It needs the tag `v<versionName>` and the asset `tizen-archive-android-<versionName>.apk`
+with these exact names, and takes the checksum from the `digest` GitHub reports for the asset. Mark a release that should not reach users as
+a pre-release: the check only sees the latest full release. The APK must carry the release signature, or Android refuses the update.
+
+The button is hidden at run time when an F-Droid client installed the app, not by a build flag: the F-Droid build must stay
+identical to the release APK. Check F-Droid's rules on self-updating apps before the next submission.

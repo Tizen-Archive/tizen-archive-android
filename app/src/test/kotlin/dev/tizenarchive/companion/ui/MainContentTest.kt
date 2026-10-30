@@ -61,6 +61,9 @@ private class RecordingActions : MainActions {
     override fun refreshWatchList() { calls += "refreshWatchList" }
     override fun setWatchQuery(query: String) { calls += "setWatchQuery $query" }
     override fun askWatchRemoval(item: WatchPackage) { calls += "askWatchRemoval ${item.id}" }
+    override fun checkAppUpdate() { calls += "checkAppUpdate" }
+    override fun installAppUpdate() { calls += "installAppUpdate" }
+    override fun dismissAppUpdate() { calls += "dismissAppUpdate" }
     override fun compareWithCatalog() { calls += "compareWithCatalog" }
     override fun updateOnWatch(item: WatchPackage) { calls += "updateOnWatch ${item.id}" }
     override fun setShowBuiltIn(show: Boolean) { calls += "setShowBuiltIn $show" }
@@ -474,6 +477,38 @@ class MainContentTest {
         compose.onNodeWithText(str(R.string.watch_catalog_failed)).assertExists()
         compose.onAllNodesWithText(str(R.string.watch_forecast_title)).assertCountEquals(0)
         compose.onAllNodesWithText(str(R.string.watch_not_in_archive)).assertCountEquals(0)
+    }
+
+    private val appRelease = dev.tizenarchive.companion.release.AppRelease("0.4.0", "Fixes and more", 2_000_000, "0".repeat(64), "https://github.com/x.apk")
+
+    @Test
+    fun `an offered app update shows its notes and installs after a tap`() {
+        show(UiState(appUpdate = AppUpdateState.Available(appRelease)))
+        compose.onNodeWithText(str(R.string.app_update_available, "0.4.0")).assertExists()
+        compose.onNodeWithText("Fixes and more").assertExists()
+        compose.onNodeWithText(str(R.string.app_update_install)).performClick()
+        compose.runOnIdle { assertEquals("installAppUpdate", actions.calls.last()) }
+    }
+
+    @Test
+    fun `an app update cannot start during another operation`() {
+        show(UiState(installing = true, appUpdate = AppUpdateState.Available(appRelease)))
+        compose.onNodeWithText(str(R.string.app_update_install)).assertIsNotEnabled()
+        compose.onNodeWithText(str(R.string.app_update_busy)).assertExists()
+    }
+
+    @Test
+    fun `a download of the app update can be cancelled and a problem explains itself`() {
+        show(UiState(appUpdate = AppUpdateState.Downloading(appRelease, 40)))
+        compose.onNodeWithText(str(R.string.state_downloading, 40)).assertExists()
+        compose.onNodeWithText(str(R.string.cancel)).performClick()
+        compose.runOnIdle { assertEquals("dismissAppUpdate", actions.calls.last()) }
+    }
+
+    @Test
+    fun `a failed app update says why`() {
+        show(UiState(appUpdate = AppUpdateState.Failed(AppUpdateProblem.RATE_LIMITED)))
+        compose.onNodeWithText(str(R.string.app_update_problem_limit)).assertExists()
     }
 
     @Test
