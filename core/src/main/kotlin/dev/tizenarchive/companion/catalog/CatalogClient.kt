@@ -18,6 +18,9 @@ public interface CatalogApi {
     /** Resolves the latest version when [version] is null. */
     public fun version(packageId: String, version: String?): VersionInfo
 
+    /** The published packages among [packageIds]; ids the catalog cannot have and ids it does not publish are left out. */
+    public fun lookup(packageIds: Collection<String>): List<PackageSummary>
+
     /** Downloads and verifies the artifact; the partial file is removed on any failure. */
     public fun download(artifact: Artifact, destination: File, progress: (Long) -> Unit = {})
 }
@@ -52,6 +55,30 @@ public class CatalogClient(
             throw CatalogException(CatalogError.BAD_RESPONSE, "The catalog returned an unexpected identifier")
         }
         return info
+    }
+
+    override fun lookup(packageIds: Collection<String>): List<PackageSummary> {
+        // One id the catalog refuses would fail the whole request
+        val wanted = packageIds.filter(LOOKUP_ID::matches).distinct()
+        return lookupChunks(wanted).flatMap { chunk ->
+            getJson<LookupAnswer>("/api/catalog/lookup", query = "ids=" + chunk.joinToString(","))
+                .items.filter { it.packageId in chunk }
+        }
+    }
+
+    /** At most as many ids as the catalog takes and as long a list as servers accept in a URL. */
+    private fun lookupChunks(ids: List<String>): List<List<String>> {
+        val chunks = mutableListOf<MutableList<String>>()
+        var length = 0
+        for (id in ids) {
+            if (chunks.isEmpty() || chunks.last().size == LOOKUP_CHUNK || length + id.length + 1 > LOOKUP_QUERY_CHARS) {
+                chunks += mutableListOf<String>()
+                length = 0
+            }
+            chunks.last() += id
+            length += id.length + 1
+        }
+        return chunks
     }
 
     override fun download(artifact: Artifact, destination: File, progress: (Long) -> Unit) {
@@ -90,8 +117,8 @@ public class CatalogClient(
         }
     }
 
-    private inline fun <reified T> getJson(path: String): T {
-        open(path, accept = "application/json").use { connection ->
+    private inline fun <reified T> getJson(path: String, query: String? = null): T {
+        open(path, accept = "application/json", query = query).use { connection ->
             val bytes = try {
                 connection.inputStream.use { it.readUpTo(MAX_JSON_BYTES + 1) }
             } catch (e: IOException) {
@@ -107,11 +134,11 @@ public class CatalogClient(
     }
 
     /** Only paths on the catalog itself are followed; an absolute URL from a response is never fetched. */
-    private fun open(path: String, accept: String? = null): Connection {
+    private fun open(path: String, accept: String? = null, query: String? = null): Connection {
         if (!path.startsWith("/") || path.startsWith("//")) {
             throw CatalogException(CatalogError.BAD_RESPONSE, "The catalog returned an unexpected URL")
         }
-        val url = URI(base.scheme, base.authority, base.path.trimEnd('/') + path, null, null).toURL()
+        val url = URI(base.scheme, base.authority, base.path.trimEnd('/') + path, query, null).toURL()
         try {
             val connection = url.openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = false
@@ -141,5 +168,12 @@ public class CatalogClient(
         const val MAX_JSON_BYTES = 5 * 1024 * 1024
         const val MAX_ARTIFACT_BYTES = 512L * 1024 * 1024
         const val BUFFER = 64 * 1024
+
+        /** As many ids as the catalog takes in one lookup. */
+        const val LOOKUP_CHUNK = 100
+
+        /** Well under the 8 KB that a default nginx takes for the request line. */
+        const val LOOKUP_QUERY_CHARS = 6_000
+        val LOOKUP_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
     }
 }

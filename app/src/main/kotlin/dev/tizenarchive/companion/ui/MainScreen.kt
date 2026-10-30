@@ -70,7 +70,18 @@ import dev.tizenarchive.companion.catalog.NotInstallableReason
 import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.files.PackagePreview
+import dev.tizenarchive.companion.sdb.PackageOrigin
 import dev.tizenarchive.companion.sdb.SdbError
+import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.sdb.WatchPackageKind
+import dev.tizenarchive.companion.catalog.PackageSummary
+import dev.tizenarchive.companion.catalog.Verdict
+import dev.tizenarchive.companion.wifi.RememberedPackage
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import dev.tizenarchive.companion.files.decodeIcon
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import dev.tizenarchive.companion.signature.SignatureAssessment
 import dev.tizenarchive.companion.signature.SignatureVerdict
 import dev.tizenarchive.companion.wifi.InstallMode
@@ -536,6 +547,15 @@ private fun RemoteDialog(remote: RemoteState, route: String, onConfirm: () -> Un
     )
 }
 
+private fun reasonText(reason: NotInstallableReason): Int = when (reason) {
+    NotInstallableReason.NO_BUILDS -> R.string.reason_no_builds
+    NotInstallableReason.NOT_DOWNLOADABLE -> R.string.reason_not_downloadable
+    NotInstallableReason.DEVICE_BOUND -> R.string.reason_device_bound
+    NotInstallableReason.EXPIRED -> R.string.reason_expired
+    NotInstallableReason.REJECTED_BY_WATCH -> R.string.reason_rejected
+    NotInstallableReason.UNVERIFIED -> R.string.reason_unverified
+}
+
 @Composable
 private fun describe(problem: RemoteProblem): String = when (problem) {
     RemoteProblem.InvalidLink -> stringResource(R.string.problem_invalid_link)
@@ -549,16 +569,7 @@ private fun describe(problem: RemoteProblem): String = when (problem) {
             CatalogError.TOO_LARGE -> R.string.problem_too_large
         },
     )
-    is RemoteProblem.NotInstallable -> stringResource(
-        when (problem.reason) {
-            NotInstallableReason.NO_BUILDS -> R.string.reason_no_builds
-            NotInstallableReason.NOT_DOWNLOADABLE -> R.string.reason_not_downloadable
-            NotInstallableReason.DEVICE_BOUND -> R.string.reason_device_bound
-            NotInstallableReason.EXPIRED -> R.string.reason_expired
-            NotInstallableReason.REJECTED_BY_WATCH -> R.string.reason_rejected
-            NotInstallableReason.UNVERIFIED -> R.string.reason_unverified
-        },
-    )
+    is RemoteProblem.NotInstallable -> stringResource(reasonText(problem.reason))
 }
 
 @Composable
@@ -683,6 +694,7 @@ private fun describe(state: ItemState): String = when (state) {
     ItemState.InstalledOnWatch -> stringResource(R.string.state_done_watch)
     is ItemState.WatchRefused -> stringResource(R.string.state_watch_refused, refusal(state))
     is ItemState.WatchProblem -> stringResource(watchProblemText(state.error))
+    is ItemState.NotInstallable -> stringResource(reasonText(state.reason))
     ItemState.NoWifi -> stringResource(R.string.state_no_wifi)
     is ItemState.AlreadyOnWatch -> stringResource(R.string.state_already_on_watch, state.version)
 }
@@ -767,6 +779,8 @@ private fun WifiWatchTab(padding: PaddingValues, state: UiState, actions: MainAc
             is WatchListState.Problem ->
                 item { Text(stringResource(watchProblemText(list.error)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             is WatchListState.Loaded -> {
+                val found = (state.watchCatalog as? WatchCatalogState.Done)?.found
+                item { WatchCatalogSummary(list.packages, state.watchCatalog, state.showBuiltIn, actions) }
                 item {
                     OutlinedTextField(
                         value = state.watchQuery,
@@ -776,33 +790,178 @@ private fun WifiWatchTab(padding: PaddingValues, state: UiState, actions: MainAc
                         label = { Text(stringResource(R.string.watch_wifi_search)) },
                     )
                 }
-                val needle = state.watchQuery.trim()
-                val shown = list.packages
-                    .filter { needle.isEmpty() || it.name.contains(needle, ignoreCase = true) || it.id.contains(needle, ignoreCase = true) }
-                    .sortedWith(compareBy({ it.id !in ours }, { it.name.lowercase() }))
                 item {
-                    val total = list.packages.size
-                    Text(
-                        if (needle.isEmpty()) stringResource(R.string.watch_wifi_count, total) else stringResource(R.string.watch_wifi_shown, shown.size, total),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((kind, label) in listOf(
+                            WatchKindFilter.ALL to R.string.watch_filter_all,
+                            WatchKindFilter.FACES to R.string.watch_filter_faces,
+                            WatchKindFilter.APPS to R.string.watch_filter_apps,
+                        )) {
+                            FilterChip(selected = state.watchKind == kind, onClick = { actions.setWatchKind(kind) }, label = { Text(stringResource(label)) })
+                        }
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { actions.setShowBuiltIn(!state.showBuiltIn) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = state.showBuiltIn, onCheckedChange = actions::setShowBuiltIn)
+                        Text(stringResource(R.string.watch_show_builtin), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                val shown = WatchReview.visible(list.packages, state.watchQuery, state.showBuiltIn, state.watchKind)
+                    .sortedWith(compareBy({ !WatchReview.removable(it, state.remembered) }, { it.name.lowercase() }))
+                item {
+                    Text(stringResource(R.string.watch_wifi_shown, shown.size, list.packages.size), style = MaterialTheme.typography.bodySmall)
                 }
                 if (shown.isEmpty()) item { Text(stringResource(R.string.watch_wifi_nothing)) }
                 items(shown, key = { it.id }) { item ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(item.name, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                listOf(item.id, "v${item.version}", item.type.uppercase()).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            val mine = ours[item.id]
-                            if (mine != null) {
-                                val date = DateUtils.formatDateTime(context, mine.installedAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR)
-                                Text(stringResource(R.string.watch_wifi_ours, date), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                OutlinedButton(onClick = { actions.askWatchRemoval(item) }, enabled = !state.installing) { Text(stringResource(R.string.watch_wifi_remove)) }
-                            }
+                    WatchPackageCard(
+                        item = item,
+                        icon = state.watchIcons[item.id],
+                        summary = found?.get(item.id),
+                        catalogChecked = found != null,
+                        mine = ours[item.id],
+                        removable = WatchReview.removable(item, state.remembered),
+                        itemState = state.states[watchKey(item.id)],
+                        installing = state.installing,
+                        actions = actions,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchCatalogSummary(packages: List<WatchPackage>, catalog: WatchCatalogState, showBuiltIn: Boolean, actions: MainActions) {
+    when (catalog) {
+        WatchCatalogState.Idle -> CompareButton(actions)
+        WatchCatalogState.Loading -> Text(stringResource(R.string.watch_catalog_loading), style = MaterialTheme.typography.bodySmall)
+        is WatchCatalogState.Failed -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.watch_catalog_failed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            CompareButton(actions)
+        }
+        is WatchCatalogState.Done -> {
+            val forecast = WatchReview.forecast(packages, catalog.found)
+            val updates = WatchReview.visible(packages, "", showBuiltIn, WatchKindFilter.ALL).count { WatchReview.update(it, catalog.found[it.id]) != null }
+            if (forecast == null && updates == 0) return
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (forecast != null) ResetForecastText(forecast)
+                    if (updates > 0) {
+                        Text(pluralStringResource(R.plurals.watch_updates_found, updates, updates), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompareButton(actions: MainActions) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedButton(onClick = actions::compareWithCatalog) { Text(stringResource(R.string.watch_compare)) }
+        Text(stringResource(R.string.watch_compare_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ResetForecastText(forecast: ResetForecast) {
+    val small = MaterialTheme.typography.bodySmall
+    fun names(items: List<WatchPackage>) = items.joinToString(", ") { it.name }
+    Text(stringResource(R.string.watch_forecast_title), style = MaterialTheme.typography.titleMedium)
+    val doubts = forecast.unsure.size + forecast.lost.size + forecast.unknown
+    when {
+        doubts == 0 && forecast.restorable.isEmpty() -> Text(stringResource(R.string.watch_forecast_none), style = small)
+        doubts == 0 -> Text(stringResource(R.string.watch_forecast_all_safe), style = small)
+        forecast.restorable.isNotEmpty() ->
+            Text(pluralStringResource(R.plurals.watch_forecast_restorable, forecast.restorable.size, forecast.restorable.size), style = small)
+    }
+    if (forecast.lost.isNotEmpty()) {
+        Text(pluralStringResource(R.plurals.watch_forecast_lost, forecast.lost.size, forecast.lost.size, names(forecast.lost)), style = small, color = MaterialTheme.colorScheme.error)
+    }
+    if (forecast.unsure.isNotEmpty()) {
+        Text(pluralStringResource(R.plurals.watch_forecast_unsure, forecast.unsure.size, forecast.unsure.size, names(forecast.unsure)), style = small, color = MaterialTheme.colorScheme.error)
+    }
+    if (forecast.unknown > 0) {
+        Text(pluralStringResource(R.plurals.watch_forecast_unknown, forecast.unknown, forecast.unknown), style = small)
+    }
+}
+
+@Composable
+private fun WatchPackageCard(
+    item: WatchPackage,
+    icon: ByteArray?,
+    summary: PackageSummary?,
+    catalogChecked: Boolean,
+    mine: RememberedPackage?,
+    removable: Boolean,
+    itemState: ItemState?,
+    installing: Boolean,
+    actions: MainActions,
+) {
+    val context = LocalContext.current
+    val bitmap by produceState<ImageBitmap?>(null, icon) {
+        value = icon?.let { withContext(Dispatchers.Default) { runCatching { decodeIcon(it) }.getOrNull() } }
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(16.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                bitmap?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+            }
+            Column(modifier = Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.name, style = MaterialTheme.typography.titleMedium)
+                val kind = when (item.kind) {
+                    WatchPackageKind.WATCH_FACE -> stringResource(R.string.watch_kind_face)
+                    WatchPackageKind.APP -> stringResource(R.string.watch_kind_app)
+                    null -> null
+                }
+                Text(
+                    listOfNotNull(kind, item.id, "v${item.version}", item.type.uppercase()).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                when (item.origin) {
+                    PackageOrigin.BUILT_IN -> stringResource(R.string.watch_origin_builtin)
+                    PackageOrigin.BUILT_IN_UPDATED -> stringResource(R.string.watch_origin_updated)
+                    else -> null
+                }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (mine != null) {
+                    val date = DateUtils.formatDateTime(context, mine.installedAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR)
+                    Text(stringResource(R.string.watch_wifi_ours, date), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (catalogChecked && item.origin == PackageOrigin.ADDED) {
+                    when {
+                        summary == null -> Text(stringResource(R.string.watch_not_in_archive), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        summary.verdict == Verdict.INSTALLABLE -> Text(stringResource(R.string.watch_in_archive), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else -> Text(stringResource(R.string.watch_archive_not_installable), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                if (itemState != null) {
+                    Text(
+                        describe(itemState),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (itemState.isFailure()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val update = WatchReview.update(item, summary)
+                val busy = installing && itemState != null && !itemState.isFinal()
+                if (busy) {
+                    OutlinedButton(onClick = actions::cancel) { Text(stringResource(R.string.cancel)) }
+                } else if (update != null || removable) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (update != null && itemState !is ItemState.InstalledOnWatch) {
+                            Button(onClick = { actions.updateOnWatch(item) }, enabled = !installing) { Text(stringResource(R.string.update_to, update)) }
+                        }
+                        if (removable) {
+                            OutlinedButton(onClick = { actions.askWatchRemoval(item) }, enabled = !installing) { Text(stringResource(R.string.watch_wifi_remove)) }
                         }
                     }
                 }

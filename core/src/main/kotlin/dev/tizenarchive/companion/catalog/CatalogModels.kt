@@ -6,6 +6,18 @@ import kotlinx.serialization.Serializable
 @Serializable
 public data class PackageInfo(val latestVersion: String? = null)
 
+/** A package as the catalog lists it: its latest version and how that version's primary build was judged. */
+@Serializable
+public data class PackageSummary(
+    val packageId: String,
+    val name: String? = null,
+    val latestVersion: String? = null,
+    val verdict: Verdict = Verdict.UNKNOWN,
+)
+
+@Serializable
+internal data class LookupAnswer(val items: List<PackageSummary> = emptyList())
+
 @Serializable
 public enum class Verdict {
     @SerialName("installable") INSTALLABLE,

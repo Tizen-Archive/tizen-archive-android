@@ -136,15 +136,62 @@
     <string name="tab_watch_wifi">На часах</string>
     <string name="reinstall_option">Устанавливать заново, даже если эта версия уже есть на часах</string>
     <string name="state_already_on_watch">Уже есть на часах (v%1$s), пропущено. Включите «Устанавливать заново, даже если эта версия уже есть на часах», чтобы поставить всё равно.</string>
-    <string name="watch_wifi_intro">Системные пакеты тоже в списке. Здесь можно удалить только то, что установило это приложение; вместе с пакетом удаляются его данные на часах.</string>
+    <string name="watch_wifi_intro">В списке пакеты, добавленные на часы; встроенные в прошивку показываются по запросу. Вместе с пакетом удаляются его данные на часах.</string>
     <string name="watch_wifi_refresh">Обновить</string>
     <string name="watch_wifi_loading">Запрашиваю часы…</string>
-    <string name="watch_wifi_count">Пакетов на часах: %1$d</string>
     <string name="watch_wifi_shown">Показано %1$d из %2$d пакетов</string>
     <string name="watch_wifi_search">Поиск по названию или идентификатору</string>
     <string name="watch_wifi_nothing">Ничего не найдено</string>
     <string name="watch_wifi_ours">Установлено этим приложением: %1$s</string>
     <string name="watch_wifi_remove">Удалить</string>
+    <string name="watch_compare">Сверить с Tizen Archive</string>
+    <string name="watch_compare_note">В Tizen Archive будут отправлены идентификаторы добавленных пакетов, чтобы найти обновления и понять, что пропадёт при сбросе.</string>
+    <string name="watch_archive_not_installable">Есть в Tizen Archive, но последнюю версию оттуда установить нельзя</string>
+    <plurals name="watch_forecast_unsure">
+        <item quantity="one">Есть в Tizen Archive, но последнюю версию нельзя установить, %1$d пакет: %2$s</item>
+        <item quantity="few">Есть в Tizen Archive, но последние версии нельзя установить, %1$d пакета: %2$s</item>
+        <item quantity="many">Есть в Tizen Archive, но последние версии нельзя установить, %1$d пакетов: %2$s</item>
+        <item quantity="other">Есть в Tizen Archive, но последние версии нельзя установить, %1$d пакета: %2$s</item>
+    </plurals>
+    <plurals name="watch_forecast_unknown">
+        <item quantity="one">Часы не сообщили, откуда взялся %1$d пакет.</item>
+        <item quantity="few">Часы не сообщили, откуда взялись %1$d пакета.</item>
+        <item quantity="many">Часы не сообщили, откуда взялись %1$d пакетов.</item>
+        <item quantity="other">Часы не сообщили, откуда взялись %1$d пакета.</item>
+    </plurals>
+    <string name="watch_show_builtin">Показывать встроенные пакеты</string>
+    <string name="watch_filter_all">Все</string>
+    <string name="watch_filter_faces">Циферблаты</string>
+    <string name="watch_filter_apps">Приложения</string>
+    <string name="watch_kind_face">Циферблат</string>
+    <string name="watch_kind_app">Приложение</string>
+    <string name="watch_origin_builtin">Встроенный</string>
+    <string name="watch_origin_updated">Встроенный, обновлён</string>
+    <string name="watch_in_archive">Есть в Tizen Archive</string>
+    <string name="watch_not_in_archive">Нет в Tizen Archive: после сброса пропадёт насовсем</string>
+    <string name="watch_catalog_loading">Сверяю с Tizen Archive…</string>
+    <string name="watch_catalog_failed">Не удалось сверить с Tizen Archive. Проверьте интернет и попробуйте ещё раз.</string>
+    <string name="watch_forecast_title">После сброса часов</string>
+    <string name="watch_forecast_none">Вы не добавляли пакетов, сброс отсюда ничего не отнимет.</string>
+    <string name="watch_forecast_all_safe">Всё, что вы добавили, можно снова установить из Tizen Archive.</string>
+    <plurals name="watch_forecast_restorable">
+        <item quantity="one">%1$d добавленный пакет можно снова установить из Tizen Archive.</item>
+        <item quantity="few">%1$d добавленных пакета можно снова установить из Tizen Archive.</item>
+        <item quantity="many">%1$d добавленных пакетов можно снова установить из Tizen Archive.</item>
+        <item quantity="other">%1$d добавленного пакета можно снова установить из Tizen Archive.</item>
+    </plurals>
+    <plurals name="watch_forecast_lost">
+        <item quantity="one">Нет в Tizen Archive и пропадёт %1$d пакет: %2$s</item>
+        <item quantity="few">Нет в Tizen Archive и пропадут %1$d пакета: %2$s</item>
+        <item quantity="many">Нет в Tizen Archive и пропадут %1$d пакетов: %2$s</item>
+        <item quantity="other">Нет в Tizen Archive и пропадут %1$d пакета: %2$s</item>
+    </plurals>
+    <plurals name="watch_updates_found">
+        <item quantity="one">В Tizen Archive есть %1$d обновление.</item>
+        <item quantity="few">В Tizen Archive есть %1$d обновления.</item>
+        <item quantity="many">В Tizen Archive есть %1$d обновлений.</item>
+        <item quantity="other">В Tizen Archive есть %1$d обновления.</item>
+    </plurals>
     <string name="watch_remove_title">Удалить «%1$s» с часов?</string>
     <string name="watch_remove_message">Приложение будет удалено с часов вместе с его данными. Это нельзя отменить.</string>
     <string name="watch_remove_working">Удаляю…</string>

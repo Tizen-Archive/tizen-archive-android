@@ -34,8 +34,9 @@ Both ways install only what the watch's own package manager accepts (a valid sto
   the address by hand. The first time, the watch asks you to allow this phone. The queue shows sending and installation
   progress and the exact answer of the watch if it refuses a package (for example `Check certificate error -12`).
   A version the watch already has, or a newer one, is skipped (an option installs it again). The "On the watch" tab then shows the
-  packages the watch itself reports, with search, and removes the ones this app installed (the watch does not tell
-  system packages apart, so only the app's own can be removed).
+  packages added to the watch with their icons, with search and a filter for watch faces and apps; built-in packages show on
+  request. It removes what was added, and on request compares the list with the catalog: it finds updates and installs them, and
+  says which packages a reset would lose.
 - Wi-Fi way: **Save packages from Galaxy Store** keeps a copy of what you install on the watch with Galaxy Wearable
   (from Galaxy Store, which still serves apps you bought before, or from a companion app). While it is on, the app looks
   every 1.5 s at the directory where the watch keeps a delivered package until its installer is done with it, copies
@@ -45,7 +46,7 @@ Both ways install only what the watch's own package manager accepts (a valid sto
   runs and a notification reports its end. While a queue runs a foreground service keeps the app alive when you switch
   away, with a progress notification (and Cancel); when the app is in the background, Android's install confirmation
   arrives as a notification you tap, because Android does not let a background app open windows.
-- No ads, analytics or trackers. The internet is used only for the catalog link above and for the update check you
+- No ads, analytics or trackers. The internet is used only for the catalog link above and for the update checks you
   start. The Wi-Fi way connects only to the watch in your local network (a private address you type or find with
   the button, port 26101) and never to anything else.
 - English and Russian interface.

@@ -130,15 +130,52 @@
     <string name="tab_watch_wifi">On the watch</string>
     <string name="reinstall_option">Install again even if the watch already has the version</string>
     <string name="state_already_on_watch">Already on the watch (v%1$s), skipped. Turn on “Install again even if the watch already has the version” to install it anyway.</string>
-    <string name="watch_wifi_intro">System packages are listed too. Only packages installed by this app can be removed here; removing a package also deletes its data on the watch.</string>
+    <string name="watch_wifi_intro">Packages added to the watch are listed; the firmware\'s own ones show on request. Removing a package also deletes its data on the watch.</string>
     <string name="watch_wifi_refresh">Refresh</string>
     <string name="watch_wifi_loading">Asking the watch…</string>
-    <string name="watch_wifi_count">Packages on the watch: %1$d</string>
     <string name="watch_wifi_shown">Shown %1$d of %2$d packages</string>
     <string name="watch_wifi_search">Search by name or id</string>
     <string name="watch_wifi_nothing">Nothing found</string>
     <string name="watch_wifi_ours">Installed by this app on %1$s</string>
     <string name="watch_wifi_remove">Remove</string>
+    <string name="watch_compare">Compare with Tizen Archive</string>
+    <string name="watch_compare_note">Sends the ids of the packages you added to Tizen Archive, to find updates and see what a reset would remove.</string>
+    <string name="watch_archive_not_installable">In Tizen Archive, but its latest version there cannot be installed</string>
+    <plurals name="watch_forecast_unsure">
+        <item quantity="one">%1$d is in Tizen Archive, but its latest version cannot be installed: %2$s</item>
+        <item quantity="other">%1$d are in Tizen Archive, but their latest versions cannot be installed: %2$s</item>
+    </plurals>
+    <plurals name="watch_forecast_unknown">
+        <item quantity="one">The watch did not say where %1$d package came from.</item>
+        <item quantity="other">The watch did not say where %1$d packages came from.</item>
+    </plurals>
+    <string name="watch_show_builtin">Show built-in packages</string>
+    <string name="watch_filter_all">All</string>
+    <string name="watch_filter_faces">Watch faces</string>
+    <string name="watch_filter_apps">Apps</string>
+    <string name="watch_kind_face">Watch face</string>
+    <string name="watch_kind_app">App</string>
+    <string name="watch_origin_builtin">Built in</string>
+    <string name="watch_origin_updated">Built in, updated</string>
+    <string name="watch_in_archive">In Tizen Archive</string>
+    <string name="watch_not_in_archive">Not in Tizen Archive: a reset removes it for good</string>
+    <string name="watch_catalog_loading">Comparing with Tizen Archive…</string>
+    <string name="watch_catalog_failed">Could not compare with Tizen Archive. Check the internet connection and try again.</string>
+    <string name="watch_forecast_title">After a reset of the watch</string>
+    <string name="watch_forecast_none">You have not added any packages, a reset loses nothing from here.</string>
+    <string name="watch_forecast_all_safe">Every package you added can be installed again from Tizen Archive.</string>
+    <plurals name="watch_forecast_restorable">
+        <item quantity="one">%1$d added package can be installed again from Tizen Archive.</item>
+        <item quantity="other">%1$d added packages can be installed again from Tizen Archive.</item>
+    </plurals>
+    <plurals name="watch_forecast_lost">
+        <item quantity="one">%1$d is not in Tizen Archive and would be lost: %2$s</item>
+        <item quantity="other">%1$d are not in Tizen Archive and would be lost: %2$s</item>
+    </plurals>
+    <plurals name="watch_updates_found">
+        <item quantity="one">Tizen Archive has %1$d update.</item>
+        <item quantity="other">Tizen Archive has %1$d updates.</item>
+    </plurals>
     <string name="watch_remove_title">Remove “%1$s” from the watch?</string>
     <string name="watch_remove_message">The app is removed from the watch together with its data. This cannot be undone.</string>
     <string name="watch_remove_working">Removing…</string>

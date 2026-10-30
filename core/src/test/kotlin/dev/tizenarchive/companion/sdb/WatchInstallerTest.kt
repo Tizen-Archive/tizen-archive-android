@@ -39,7 +39,15 @@ class WatchInstallerTest {
 
         override fun list(remoteDir: String): List<RemoteEntry> = emptyList()
 
-        override fun pull(remotePath: String, out: java.io.OutputStream, maxBytes: Long): Boolean = false
+        val files = mutableMapOf<String, ByteArray>()
+
+        override fun pull(remotePath: String, out: java.io.OutputStream, maxBytes: Long): Boolean {
+            steps += "pull $remotePath"
+            val bytes = files[remotePath] ?: return false
+            if (bytes.size > maxBytes) throw SdbException(SdbError.PROTOCOL, "too large")
+            out.write(bytes)
+            return true
+        }
 
         override fun close() = Unit
     }
@@ -159,5 +167,130 @@ class WatchInstallerTest {
         }
         assertTrue(service.steps.isEmpty())
         assertTrue(WatchInstaller.isPackageId("a".repeat(128)))
+    }
+
+    private val listing = """
+        pkg_type [tpk] pkgid [com.samsung.clock] name [Clock] version [1.0.0]
+        pkg_type [wgt] pkgid [com.samsung.weather] name [Weather] version [2.1.0]
+        pkg_type [tpk] pkgid [org.example.face] name [Face] version [1.2]
+        pkg_type [wgt] pkgid [Dice00abcd] name [Dice] version [1.0.2]
+        pkg_type [tpk] pkgid [org.example.quiet] name [Quiet] version [1.0]
+        pkg_type [wgt] pkgid [WebFace0001] name [Web face] version [1.0]
+        pkg_type [tpk] pkgid [org.example.elsewhere] name [Elsewhere] version [1.0]
+    """.trimIndent()
+
+    // As SM-R800 printed it: first the applications, then the packages under /opt/usr/globalapps
+    private val details = listOf(
+        "Appid: com.samsung.clock.main",
+        "Package: com.samsung.clock",
+        "Apptype: capp",
+        "component: watchapp",
+        "Appid: com.samsung.weather",
+        "Package: com.samsung.weather",
+        "Apptype: webapp",
+        "component: uiapp",
+        "Appid: org.example.face.web",
+        "Package: org.example.face",
+        "Apptype: webapp",
+        "component: uiapp",
+        "Appid: Dice00abcd.Dice",
+        "Package: Dice00abcd",
+        "Apptype: webapp",
+        "component: uiapp",
+        "Appid: org.example.quiet",
+        "Package: org.example.quiet",
+        "Apptype: capp",
+        "component: svcapp",
+        "Appid: WebFace0001.Face",
+        "Package: WebFace0001",
+        "Apptype: webapp",
+        "component: watchapp",
+        "Appid: bad;id",
+        "Package: org.example.evil",
+        "component: watchapp",
+        WatchInstaller.FIRMWARE_MARK,
+        "com.samsung.clock",
+        "com.samsung.weather",
+        WatchInstaller.GLOBAL_APPS_MARK,
+        "pkg com.samsung.weather",
+        "Icon: /opt/usr/globalapps/com.samsung.weather/shared/res/weather.png",
+        "Preload: 1",
+        "update: 1",
+        "pkg org.example.face",
+        "Icon: /opt/usr/globalapps/org.example.face/shared/res/face.png\r",
+        // Lines of a description that look like the flags come before the real ones
+        "Update: 1",
+        "Icon: /opt/usr/globalapps/org.example.face/other.png",
+        "Preload: 0",
+        "update: 0",
+        "pkg Dice00abcd",
+        "icon : /opt/usr/globalapps/other.package/shared/res/x.png",
+        "preload : 0",
+        "pkg org.example.quiet",
+        "pkg WebFace0001",
+        "Preload: 0",
+        "pkg ../evil",
+        "Preload: 0",
+    ).joinToString("\n")
+
+    private val categories = listOf(
+        "app com.samsung.weather",
+        "Category: com.samsung.wmanager.WATCH_APP",
+        "app org.example.face.web",
+        "Category: http://tizen.org/category/wearable_clock",
+        "app Dice00abcd.Dice",
+    ).joinToString("\n")
+
+    @Test
+    fun `the inventory tells firmware, updated firmware and added packages apart`() {
+        val service = FakeService().also {
+            it.answers["pkgcmd -l"] = listing
+            it.answers["pkginfo --listapp"] = details
+            it.answers["for a in "] = categories
+        }
+        val packages = WatchInstaller(service).inventory().associateBy { it.id }
+
+        assertEquals(PackageOrigin.BUILT_IN, packages.getValue("com.samsung.clock").origin)
+        assertEquals(WatchPackageKind.WATCH_FACE, packages.getValue("com.samsung.clock").kind)
+        assertEquals(PackageOrigin.BUILT_IN_UPDATED, packages.getValue("com.samsung.weather").origin)
+        assertEquals(WatchPackageKind.APP, packages.getValue("com.samsung.weather").kind)
+        assertEquals(PackageOrigin.ADDED, packages.getValue("org.example.face").origin)
+        assertEquals(WatchPackageKind.WATCH_FACE, packages.getValue("org.example.face").kind)
+        assertEquals("/opt/usr/globalapps/org.example.face/shared/res/face.png", packages.getValue("org.example.face").iconPath)
+        assertEquals(WatchPackageKind.APP, packages.getValue("Dice00abcd").kind)
+        // An icon outside the package's own directory is not taken
+        assertEquals(null, packages.getValue("Dice00abcd").iconPath)
+        // Under /opt/usr/globalapps but pkginfo said nothing: unknown, not firmware
+        assertEquals(null, packages.getValue("org.example.quiet").origin)
+        assertEquals(WatchPackageKind.APP, packages.getValue("org.example.quiet").kind)
+        assertEquals(WatchPackageKind.WATCH_FACE, packages.getValue("WebFace0001").kind)
+        // In neither directory: nothing is known about it, so it is not called firmware
+        assertEquals(null, packages.getValue("org.example.elsewhere").origin)
+        // Only the web applications of packages under /opt/usr/globalapps are asked for their categories
+        val categoryCommand = service.steps.single { it.startsWith("for a in ") }
+        assertTrue(categoryCommand.startsWith("for a in com.samsung.weather org.example.face.web Dice00abcd.Dice; do "), categoryCommand)
+        assertEquals(3, service.steps.size)
+    }
+
+    @Test
+    fun `without an answer about the directories no package is called firmware`() {
+        val service = FakeService().also { it.answers["pkgcmd -l"] = listing }
+        assertTrue(WatchInstaller(service).inventory().all { it.origin == null })
+    }
+
+    @Test
+    fun `icons are pulled by path, missing or too large ones are null`() {
+        val path = "/opt/usr/globalapps/org.example.face/shared/res/face.png"
+        val service = FakeService().also {
+            it.files[path] = byteArrayOf(1, 2, 3)
+            it.files["/opt/usr/globalapps/big/icon.png"] = ByteArray(20)
+        }
+        val installer = WatchInstaller(service)
+
+        assertEquals(listOf<Byte>(1, 2, 3), installer.icon(path)!!.toList())
+        assertEquals(null, installer.icon("/opt/usr/globalapps/none/icon.png"))
+        assertEquals(null, installer.icon("/opt/usr/globalapps/big/icon.png", maxBytes = 10))
+        assertThrows(IllegalArgumentException::class.java) { installer.icon("/opt/usr/globalapps/../../etc/passwd") }
+        assertThrows(IllegalArgumentException::class.java) { installer.icon("relative/icon.png") }
     }
 }

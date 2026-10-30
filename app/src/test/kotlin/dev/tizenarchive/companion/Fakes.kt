@@ -159,6 +159,16 @@ internal class FakeCatalog : CatalogApi {
         return versions[packageId] ?: throw dev.tizenarchive.companion.catalog.CatalogException(dev.tizenarchive.companion.catalog.CatalogError.NOT_FOUND, "no $packageId")
     }
 
+    var summaries = mutableMapOf<String, dev.tizenarchive.companion.catalog.PackageSummary>()
+    var lookupFailure: Exception? = null
+    val lookups = mutableListOf<List<String>>()
+
+    override fun lookup(packageIds: Collection<String>): List<dev.tizenarchive.companion.catalog.PackageSummary> {
+        lookups += packageIds.toList()
+        lookupFailure?.let { throw it }
+        return packageIds.mapNotNull { summaries[it] }
+    }
+
     override fun download(artifact: Artifact, destination: File, progress: (Long) -> Unit) {
         failure?.let { throw it }
         destination.writeBytes(payload)
@@ -246,6 +256,17 @@ internal class FakeWatch : WatchGateway {
     var removeOutcome: WatchRemoveOutcome = WatchRemoveOutcome.Removed
     var removeGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     val removed = mutableListOf<String>()
+
+    var iconFiles = mutableMapOf<String, ByteArray>()
+    val iconRequests = mutableListOf<Map<String, String>>()
+    var iconGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    override suspend fun icons(address: java.net.InetAddress, paths: Map<String, String>): Map<String, ByteArray> {
+        iconRequests += paths
+        // Connecting to the watch cannot be cancelled
+        iconGate?.let { gate -> kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() } }
+        return paths.mapNotNull { (id, path) -> iconFiles[path]?.let { id to it } }.toMap()
+    }
 
     override suspend fun list(address: java.net.InetAddress): WatchListOutcome {
         lists++

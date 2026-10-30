@@ -57,7 +57,19 @@ internal class WifiWatchGateway(
     }
 
     override suspend fun list(address: InetAddress): WatchListOutcome =
-        withWatch(address, WatchListOutcome.NoWifi, { WatchListOutcome.Problem(it) }) { WatchListOutcome.Listed(WatchInstaller(it).list()) }
+        withWatch(address, WatchListOutcome.NoWifi, { WatchListOutcome.Problem(it) }) { WatchListOutcome.Listed(WatchInstaller(it).inventory()) }
+
+    override suspend fun icons(address: InetAddress, paths: Map<String, String>): Map<String, ByteArray> {
+        val found = mutableMapOf<String, ByteArray>()
+        withWatch(address, Unit, {}) { session ->
+            val installer = WatchInstaller(session)
+            for ((id, path) in paths) {
+                if (!WatchInstaller.isIconPath(path)) continue
+                installer.icon(path)?.let { found[id] = it }
+            }
+        }
+        return found
+    }
 
     override suspend fun remove(address: InetAddress, packageId: String): WatchRemoveOutcome =
         withWatch(address, WatchRemoveOutcome.NoWifi, { WatchRemoveOutcome.Problem(it) }) { session ->

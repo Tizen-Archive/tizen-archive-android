@@ -26,6 +26,7 @@ import dev.tizenarchive.companion.install.InstallOutcome
 import dev.tizenarchive.companion.install.UninstallOutcome
 import dev.tizenarchive.companion.notify.ProgressInfo
 import dev.tizenarchive.companion.sdb.InstallProgress
+import dev.tizenarchive.companion.sdb.PackageOrigin
 import dev.tizenarchive.companion.sdb.PackageType
 import dev.tizenarchive.companion.sdb.SdbError
 import dev.tizenarchive.companion.sdb.WatchPackage
@@ -80,6 +81,10 @@ internal interface MainActions {
     fun refreshWatchList()
     fun setWatchQuery(query: String)
     fun askWatchRemoval(item: WatchPackage)
+    fun compareWithCatalog()
+    fun updateOnWatch(item: WatchPackage)
+    fun setShowBuiltIn(show: Boolean)
+    fun setWatchKind(kind: WatchKindFilter)
     fun confirmWatchRemoval()
     fun dismissWatchRemoval()
     fun startCapture()
@@ -88,6 +93,11 @@ internal interface MainActions {
 
 /** The key under which the state of sending a companion again is kept (the list items use their file URI). */
 internal fun companionKey(androidPackage: String): Uri = Uri.parse("companion:$androidPackage")
+
+/** The key under which the state of updating a package on the watch is kept. */
+internal fun watchKey(packageId: String): Uri = Uri.parse("watch:$packageId")
+
+private fun WatchPackage.withVersion(version: String) = WatchPackage(id, name, version, type, origin, kind, iconPath)
 
 internal sealed interface ItemState {
     data object Queued : ItemState
@@ -119,6 +129,9 @@ internal sealed interface ItemState {
 
     data class WatchProblem(val error: SdbError) : ItemState
 
+    /** The catalog no longer offers an installable file of this version. */
+    data class NotInstallable(val reason: NotInstallableReason) : ItemState
+
     data object NoWifi : ItemState
 
     /** Wi-Fi mode: the watch already has this version or a newer one. */
@@ -126,11 +139,13 @@ internal sealed interface ItemState {
 }
 
 internal fun ItemState?.isFailure(): Boolean = this is ItemState.Failed || this is ItemState.SignatureConflict || this is ItemState.WatchRefused ||
-    this is ItemState.WatchProblem || this is ItemState.NoWifi
+    this is ItemState.WatchProblem || this is ItemState.NoWifi || this is ItemState.NotInstallable
 
-private fun ItemState.isFinal(): Boolean = this is ItemState.Installed || this is ItemState.InstalledOnWatch || this is ItemState.AlreadySent ||
-    this is ItemState.Cancelled || this is ItemState.Failed || this is ItemState.SignatureConflict || this is ItemState.WatchRefused ||
-    this is ItemState.WatchProblem || this is ItemState.NoWifi || this is ItemState.AlreadyOnWatch
+internal fun ItemState.isFinal(): Boolean = this is ItemState.Installed || this is ItemState.InstalledOnWatch || this is ItemState.AlreadySent ||
+    this is ItemState.Cancelled || this.isFailure() || this is ItemState.AlreadyOnWatch
+
+/** The catalog's answer stopped offering the version an update was started for. */
+private class NotInstallableException(val reason: NotInstallableReason) : Exception()
 
 /** A watch found by the search; [busy] means another sdb host is connected to it right now. */
 internal data class FoundAddress(val address: String, val busy: Boolean)
@@ -276,6 +291,11 @@ internal data class UiState(
     val reinstall: Boolean = false,
     val watchList: WatchListState = WatchListState.Idle,
     val watchQuery: String = "",
+    val watchCatalog: WatchCatalogState = WatchCatalogState.Idle,
+    /** Icon files of the watch's packages, by package id. */
+    val watchIcons: Map<String, ByteArray> = emptyMap(),
+    val showBuiltIn: Boolean = false,
+    val watchKind: WatchKindFilter = WatchKindFilter.ALL,
     val watchRemoval: WatchRemoval? = null,
     val capture: CaptureState = CaptureState(),
     /** Packages this app put on the watch; only these can be removed from the app. */
@@ -317,6 +337,8 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     val state: StateFlow<UiState> = _state
 
     private var job: Job? = null
+    private var iconJob: Job? = null
+    private var compareJob: Job? = null
     private val progress = deps.progress
 
     /** Which item of the running operation is being handled, for the notification. */
@@ -458,17 +480,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
         job = viewModelScope.launch {
             try {
                 releaseWatch()
-                processItem(key) { target, set ->
-                    set(ItemState.Downloading(0))
-                    var lastPercent = -1
-                    catalog.download(update.artifact, target) { done ->
-                        val percent = if (update.artifact.size > 0) (done * 100 / update.artifact.size).toInt() else 100
-                        if (percent != lastPercent) {
-                            lastPercent = percent
-                            set(ItemState.Downloading(percent))
-                        }
-                    }
-                }
+                processItem(key) { target, set -> download(update.artifact, target, set) }
                 if (_state.value.states[key] is ItemState.Installed) {
                     _state.update { it.copy(updates = it.updates - companion.androidPackage) }
                 }
@@ -545,7 +557,12 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
 
     override fun refreshWatchList() {
         val current = _state.value
-        if (current.mode != InstallMode.WIFI || current.installing || current.capture.running || current.watchList == WatchListState.Loading) return
+        if (
+            current.mode != InstallMode.WIFI || current.installing || current.capture.running || current.watchList == WatchListState.Loading ||
+            current.watchRemoval is WatchRemoval.Working
+        ) {
+            return
+        }
         val address = WatchAddress.parse(current.watchAddress.trim())
         if (address == null) {
             _state.update { it.copy(watchAddressInvalid = true) }
@@ -555,8 +572,11 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             _state.update { it.copy(watchList = WatchListState.NoPermission) }
             return
         }
-        _state.update { it.copy(watchList = WatchListState.Loading) }
+        // The answer was about the previous list, and a new package would count as missing from the catalog
+        compareJob?.cancel()
+        _state.update { it.copy(watchList = WatchListState.Loading, watchCatalog = WatchCatalogState.Idle) }
         viewModelScope.launch {
+            iconJob?.cancelAndJoin()
             val next = try {
                 when (val outcome = deps.watch.list(address)) {
                     is WatchListOutcome.Listed -> WatchListState.Loaded(outcome.packages)
@@ -570,14 +590,87 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
                 WatchListState.Problem(SdbError.DISCONNECTED)
             }
             _state.update { it.copy(watchList = next) }
+            if (next is WatchListState.Loaded) loadWatchIcons(address, next.packages)
+        }
+    }
+
+    override fun setShowBuiltIn(show: Boolean) = _state.update { it.copy(showBuiltIn = show) }
+
+    override fun setWatchKind(kind: WatchKindFilter) = _state.update { it.copy(watchKind = kind) }
+
+    /** Sends the ids of the packages that are not firmware to the catalog, so it runs only when the user taps the button. */
+    override fun compareWithCatalog() {
+        val list = _state.value.watchList as? WatchListState.Loaded ?: return
+        if (_state.value.watchCatalog == WatchCatalogState.Loading) return
+        val ids = list.packages.filter { it.origin != PackageOrigin.BUILT_IN }.map { it.id }
+        _state.update { it.copy(watchCatalog = WatchCatalogState.Loading) }
+        compareJob = viewModelScope.launch {
+            val next = try {
+                WatchCatalogState.Done(withContext(io) { catalog.lookup(ids) }.associateBy { it.packageId })
+            } catch (e: CatalogException) {
+                WatchCatalogState.Failed(e.error)
+            }
+            _state.update { it.copy(watchCatalog = next) }
+        }
+    }
+
+    /** Firmware is left alone. The watch takes one connection at a time, so whatever holds it now goes first. */
+    private fun loadWatchIcons(address: java.net.InetAddress, packages: List<WatchPackage>) {
+        val current = _state.value
+        if (current.installing || current.capture.running || current.watchRemoval is WatchRemoval.Working) return
+        val paths = packages.filter { it.origin != PackageOrigin.BUILT_IN && it.id !in current.watchIcons }
+            .mapNotNull { item -> item.iconPath?.let { item.id to it } }.toMap()
+        if (paths.isEmpty()) return
+        iconJob = viewModelScope.launch {
+            val icons = try {
+                deps.watch.icons(address, paths)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyMap()
+            }
+            _state.update { it.copy(watchIcons = it.watchIcons + icons) }
+        }
+    }
+
+    /** Downloads the catalog's newer version and installs it over the one on the watch. */
+    override fun updateOnWatch(item: WatchPackage) {
+        val current = _state.value
+        if (current.installing || current.mode != InstallMode.WIFI || current.watchRemoval is WatchRemoval.Working) return
+        val summary = (current.watchCatalog as? WatchCatalogState.Done)?.found?.get(item.id) ?: return
+        val latest = WatchReview.update(item, summary) ?: return
+        if (!readyToDeliver()) return
+        val key = watchKey(item.id)
+        position = Triple(1, 1, item.name)
+        _state.update { it.copy(installing = true, states = it.states + (key to ItemState.Queued)) }
+        job = viewModelScope.launch {
+            try {
+                releaseWatch()
+                processItem(key) { target, set ->
+                    when (val selection = ArtifactSelection.select(catalog.version(item.id, latest))) {
+                        is Selection.Found -> download(selection.artifact, target, set)
+                        is Selection.NotInstallable -> throw NotInstallableException(selection.reason)
+                    }
+                }
+                if (_state.value.states[key] is ItemState.InstalledOnWatch) {
+                    _state.update { state ->
+                        val list = (state.watchList as? WatchListState.Loaded)?.let { loaded ->
+                            WatchListState.Loaded(loaded.packages.map { if (it.id == item.id) it.withVersion(latest) else it })
+                        } ?: state.watchList
+                        state.copy(watchList = list)
+                    }
+                }
+            } finally {
+                _state.update { it.copy(installing = false) }
+                progress.stop()
+            }
         }
     }
 
     override fun askWatchRemoval(item: WatchPackage) {
         val current = _state.value
         if (current.installing || current.watchRemoval is WatchRemoval.Working) return
-        // Only what this app installed can be removed from here: the watch does not tell system packages apart
-        if (current.remembered.none { it.id == item.id }) return
+        if (!WatchReview.removable(item, current.remembered)) return
         _state.update { it.copy(watchRemoval = WatchRemoval.Confirm(item)) }
     }
 
@@ -682,6 +775,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             val saver = launch { for (result in captured) keepCaptured(result) }
             progress.capturing(0)
             try {
+                iconJob?.cancelAndJoin()
                 deps.watch.capture(address, dir) { event ->
                     when (event) {
                         CaptureEvent.Watching -> setCapture { it.copy(status = CaptureStatus.Watching) }
@@ -707,6 +801,7 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
     /** The watch takes one sdb connection at a time: a running capture gives way to whatever else needs the watch. */
     private suspend fun releaseWatch() {
         captureJob?.cancelAndJoin()
+        iconJob?.cancelAndJoin()
     }
 
     private fun setCapture(change: (CaptureState) -> CaptureState) = _state.update { it.copy(capture = change(it.capture)) }
@@ -906,19 +1001,11 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             try {
                 releaseWatch()
                 final = runCatchingItem(::set) {
-                    set(ItemState.Downloading(0))
                     val local = File(workDir, "package.bin")
                     withContext(io) {
                         workDir.deleteRecursively()
                         workDir.mkdirs()
-                        var lastPercent = -1
-                        catalog.download(confirm.artifact, local) { done ->
-                            val percent = if (confirm.artifact.size > 0) (done * 100 / confirm.artifact.size).toInt() else 100
-                            if (percent != lastPercent) {
-                                lastPercent = percent
-                                set(ItemState.Downloading(percent))
-                            }
-                        }
+                        download(confirm.artifact, local, ::set)
                     }
                     deliver(local, ::set)
                 }
@@ -1010,6 +1097,19 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             ?.updatedAt
     }
 
+    /** Blocks; [set] sees the percentage whenever it changes. */
+    private fun download(artifact: Artifact, target: File, set: (ItemState) -> Unit) {
+        set(ItemState.Downloading(0))
+        var lastPercent = -1
+        catalog.download(artifact, target) { done ->
+            val percent = if (artifact.size > 0) (done * 100 / artifact.size).toInt() else 100
+            if (percent != lastPercent) {
+                lastPercent = percent
+                set(ItemState.Downloading(percent))
+            }
+        }
+    }
+
     /** Runs [block], turns exceptions into a final item state and always cleans the work directory. */
     private suspend fun runCatchingItem(set: (ItemState) -> Unit, block: suspend () -> ItemState): ItemState =
         try {
@@ -1019,6 +1119,8 @@ internal class MainViewModel(private val deps: Dependencies) : ViewModel(), Main
             throw e
         } catch (e: CatalogException) {
             ItemState.Failed(e.message ?: e.error.name)
+        } catch (e: NotInstallableException) {
+            ItemState.NotInstallable(e.reason)
         } catch (e: Exception) {
             ItemState.Failed(e.message ?: e.javaClass.simpleName)
         } finally {

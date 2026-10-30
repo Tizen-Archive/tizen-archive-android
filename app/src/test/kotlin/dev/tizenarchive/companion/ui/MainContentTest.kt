@@ -15,12 +15,17 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.tizenarchive.companion.R
 import dev.tizenarchive.companion.catalog.Artifact
+import dev.tizenarchive.companion.catalog.CatalogError
+import dev.tizenarchive.companion.catalog.PackageSummary
+import dev.tizenarchive.companion.catalog.Verdict
 import dev.tizenarchive.companion.catalog.VersionInfo
 import dev.tizenarchive.companion.companions.InstalledCompanion
 import dev.tizenarchive.companion.files.PackageFile
 import dev.tizenarchive.companion.files.PackagePreview
+import dev.tizenarchive.companion.sdb.PackageOrigin
 import dev.tizenarchive.companion.sdb.SdbError
 import dev.tizenarchive.companion.sdb.WatchPackage
+import dev.tizenarchive.companion.sdb.WatchPackageKind
 import dev.tizenarchive.companion.signature.SignatureAssessment
 import dev.tizenarchive.companion.signature.SignatureVerdict
 import dev.tizenarchive.companion.wifi.InstallMode
@@ -56,6 +61,10 @@ private class RecordingActions : MainActions {
     override fun refreshWatchList() { calls += "refreshWatchList" }
     override fun setWatchQuery(query: String) { calls += "setWatchQuery $query" }
     override fun askWatchRemoval(item: WatchPackage) { calls += "askWatchRemoval ${item.id}" }
+    override fun compareWithCatalog() { calls += "compareWithCatalog" }
+    override fun updateOnWatch(item: WatchPackage) { calls += "updateOnWatch ${item.id}" }
+    override fun setShowBuiltIn(show: Boolean) { calls += "setShowBuiltIn $show" }
+    override fun setWatchKind(kind: WatchKindFilter) { calls += "setWatchKind $kind" }
     override fun confirmWatchRemoval() { calls += "confirmWatchRemoval" }
     override fun dismissWatchRemoval() { calls += "dismissWatchRemoval" }
     override fun startCapture() { calls += "startCapture" }
@@ -74,6 +83,9 @@ class MainContentTest {
     private var pickTaps = 0
 
     private fun str(id: Int, vararg args: Any) = ApplicationProvider.getApplicationContext<android.content.Context>().getString(id, *args)
+
+    private fun plural(id: Int, count: Int, vararg more: Any) =
+        ApplicationProvider.getApplicationContext<android.content.Context>().resources.getQuantityString(id, count, count, *more)
 
     private fun file(name: String) = PackageFile(Uri.parse("content://tree/$name"), name, 2048)
 
@@ -345,10 +357,123 @@ class MainContentTest {
         compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
         compose.onNodeWithText("Mine").assertExists()
         compose.onNodeWithText("System app").assertExists()
-        compose.onNodeWithText(str(R.string.watch_wifi_count, 2)).assertExists()
+        compose.onNodeWithText(str(R.string.watch_wifi_shown, 2, 2)).assertExists()
         compose.onAllNodesWithText(str(R.string.watch_wifi_remove)).assertCountEquals(1)
         compose.onNodeWithText(str(R.string.watch_wifi_remove)).performClick()
         assertEquals(listOf("refreshWatchList", "askWatchRemoval com.mine").takeLast(1), actions.calls.takeLast(1))
+    }
+
+    private fun origin(id: String, name: String, origin: PackageOrigin, kind: WatchPackageKind = WatchPackageKind.APP, version: String = "1.0") =
+        WatchPackage(id, name, version, "tpk", origin, kind)
+
+    private fun summary(id: String, latest: String, verdict: Verdict = Verdict.INSTALLABLE) = PackageSummary(id, id, latest, verdict)
+
+    @Test
+    fun `firmware is hidden until asked for and added packages can be removed`() {
+        val packages = listOf(
+            origin("org.example.added", "Added face", PackageOrigin.ADDED, WatchPackageKind.WATCH_FACE),
+            origin("com.samsung.clock", "Clock", PackageOrigin.BUILT_IN),
+            origin("com.samsung.weather", "Weather", PackageOrigin.BUILT_IN_UPDATED),
+        )
+        show(UiState(mode = InstallMode.WIFI, watchList = WatchListState.Loaded(packages)))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText("Added face").assertExists()
+        compose.onAllNodesWithText("Clock").assertCountEquals(0)
+        compose.onNodeWithText(str(R.string.watch_wifi_shown, 1, 3)).assertExists()
+        compose.onNodeWithText(str(R.string.watch_wifi_remove)).performClick()
+        compose.onNodeWithText(str(R.string.watch_show_builtin)).performClick()
+        compose.onNodeWithText(str(R.string.watch_filter_faces)).performClick()
+        compose.runOnIdle {
+            assertEquals(listOf("askWatchRemoval org.example.added", "setShowBuiltIn true", "setWatchKind FACES"), actions.calls.takeLast(3))
+        }
+    }
+
+    @Test
+    fun `built-in packages say so and cannot be removed`() {
+        val packages = listOf(origin("com.samsung.clock", "Clock", PackageOrigin.BUILT_IN), origin("com.samsung.weather", "Weather", PackageOrigin.BUILT_IN_UPDATED))
+        show(UiState(mode = InstallMode.WIFI, showBuiltIn = true, watchList = WatchListState.Loaded(packages)))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.watch_origin_builtin)).assertExists()
+        compose.onNodeWithText(str(R.string.watch_origin_updated)).assertExists()
+        compose.onAllNodesWithText(str(R.string.watch_wifi_remove)).assertCountEquals(0)
+    }
+
+    @Test
+    fun `the comparison with the catalog forecasts a reset and offers updates`() {
+        val packages = listOf(
+            origin("org.example.kept", "Kept", PackageOrigin.ADDED, version = "1.0"),
+            origin("org.example.lost", "Lost one", PackageOrigin.ADDED),
+            origin("org.example.rejected", "Rejected", PackageOrigin.ADDED),
+            origin("com.samsung.clock", "Clock", PackageOrigin.BUILT_IN),
+        )
+        val found = mapOf(
+            "org.example.kept" to summary("org.example.kept", "1.5"),
+            "org.example.rejected" to summary("org.example.rejected", "2.0", Verdict.NOT_INSTALLABLE),
+        )
+        show(UiState(mode = InstallMode.WIFI, watchList = WatchListState.Loaded(packages), watchCatalog = WatchCatalogState.Done(found)))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.watch_forecast_title)).assertExists()
+        compose.onNodeWithText(plural(R.plurals.watch_forecast_restorable, 1)).assertExists()
+        compose.onNodeWithText(plural(R.plurals.watch_forecast_lost, 1, "Lost one")).assertExists()
+        compose.onNodeWithText(plural(R.plurals.watch_forecast_unsure, 1, "Rejected")).assertExists()
+        compose.onNodeWithText(plural(R.plurals.watch_updates_found, 1)).assertExists()
+        compose.onAllNodesWithText(str(R.string.watch_not_in_archive)).assertCountEquals(1)
+        compose.onAllNodesWithText(str(R.string.watch_archive_not_installable)).assertCountEquals(1)
+        compose.onAllNodesWithText(str(R.string.watch_in_archive)).assertCountEquals(1)
+        compose.onNodeWithText(str(R.string.update_to, "1.5")).performClick()
+        compose.runOnIdle { assertEquals("updateOnWatch org.example.kept", actions.calls.last()) }
+    }
+
+    @Test
+    fun `the comparison waits for a tap and says what it sends`() {
+        val packages = listOf(origin("org.example.added", "Added", PackageOrigin.ADDED))
+        show(UiState(mode = InstallMode.WIFI, watchList = WatchListState.Loaded(packages)))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.watch_compare_note)).assertExists()
+        compose.onAllNodesWithText(str(R.string.watch_forecast_title)).assertCountEquals(0)
+        compose.onNodeWithText(str(R.string.watch_compare)).performClick()
+        compose.runOnIdle { assertEquals("compareWithCatalog", actions.calls.last()) }
+    }
+
+    @Test
+    fun `updates of hidden packages are not counted and doubts are never called safe`() {
+        val packages = listOf(
+            origin("org.example.kept", "Kept", PackageOrigin.ADDED, version = "2.0"),
+            origin("com.samsung.weather", "Weather", PackageOrigin.BUILT_IN_UPDATED),
+            WatchPackage("org.example.unknown", "Unknown", "1.0", "tpk"),
+        )
+        val found = mapOf("org.example.kept" to summary("org.example.kept", "2.0"), "com.samsung.weather" to summary("com.samsung.weather", "2.0"))
+        show(UiState(mode = InstallMode.WIFI, watchList = WatchListState.Loaded(packages), watchCatalog = WatchCatalogState.Done(found)))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onAllNodesWithText(plural(R.plurals.watch_updates_found, 1)).assertCountEquals(0)
+        compose.onAllNodesWithText(str(R.string.watch_forecast_all_safe)).assertCountEquals(0)
+        compose.onNodeWithText(plural(R.plurals.watch_forecast_unknown, 1)).assertExists()
+    }
+
+    @Test
+    fun `a finished card keeps its buttons while another package installs`() {
+        val item = origin("org.example.done", "Done", PackageOrigin.ADDED, version = "1.0")
+        show(
+            UiState(
+                mode = InstallMode.WIFI,
+                installing = true,
+                watchList = WatchListState.Loaded(listOf(item)),
+                states = mapOf(watchKey(item.id) to ItemState.AlreadyOnWatch("1.0")),
+            ),
+        )
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onAllNodesWithText(str(R.string.cancel)).assertCountEquals(0)
+        compose.onNodeWithText(str(R.string.watch_wifi_remove)).assertExists()
+    }
+
+    @Test
+    fun `a failed comparison says so and claims nothing about a reset`() {
+        val packages = listOf(origin("org.example.added", "Added", PackageOrigin.ADDED))
+        show(UiState(mode = InstallMode.WIFI, watchList = WatchListState.Loaded(packages), watchCatalog = WatchCatalogState.Failed(CatalogError.NETWORK)))
+        compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
+        compose.onNodeWithText(str(R.string.watch_catalog_failed)).assertExists()
+        compose.onAllNodesWithText(str(R.string.watch_forecast_title)).assertCountEquals(0)
+        compose.onAllNodesWithText(str(R.string.watch_not_in_archive)).assertCountEquals(0)
     }
 
     @Test
@@ -364,7 +489,6 @@ class MainContentTest {
         show(UiState(mode = InstallMode.WIFI, watchQuery = "light", watchList = WatchListState.Loaded(listOf(wp("a", "White Light"), wp("b", "Clock"), wp("c", "Flash light")))))
         compose.onNodeWithText(str(R.string.tab_watch_wifi)).performClick()
         compose.onNodeWithText(str(R.string.watch_wifi_shown, 2, 3)).assertExists()
-        compose.onAllNodesWithText(str(R.string.watch_wifi_count, 3)).assertCountEquals(0)
     }
 
     @Test

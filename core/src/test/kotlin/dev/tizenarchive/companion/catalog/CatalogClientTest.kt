@@ -24,6 +24,7 @@ class CatalogClientTest {
     private val sha = MessageDigest.getInstance("SHA-256").digest(file).joinToString("") { "%02x".format(it) }
     private val seenAgents = mutableListOf<String?>()
     private var served: ByteArray = file
+    private val lookups = mutableListOf<String>()
 
     private fun client() = CatalogClient("http://127.0.0.1:${server.address.port}", "tizen-companion-installer/test", allowCleartext = true)
 
@@ -45,6 +46,13 @@ class CatalogClientTest {
                 "/api/packages/Dice" -> reply(ex, 200, """{"latestVersion":"1.0.2"}""".toByteArray())
                 "/api/packages/Dice/versions/1.0.2" -> reply(ex, 200, json.toByteArray())
                 "/api/artifacts/$sha/download" -> reply(ex, 200, served, "application/octet-stream")
+                "/api/catalog/lookup" -> {
+                    val ids = ex.requestURI.rawQuery.removePrefix("ids=").split(',')
+                    lookups += ex.requestURI.rawQuery
+                    // Answers every id it is asked for, plus one it was not asked for
+                    val items = (ids + "not.asked").joinToString(",") { """{"packageId":"$it","name":"N $it","latestVersion":"2.0","verdict":"installable","kind":"app"}""" }
+                    reply(ex, 200, """{"items":[$items]}""".toByteArray())
+                }
                 "/api/redirect" -> {
                     ex.responseHeaders.add("Location", "http://example.invalid/")
                     ex.sendResponseHeaders(302, -1)
@@ -117,5 +125,31 @@ class CatalogClientTest {
     @Test
     fun `cleartext needs an explicit opt in`() {
         assertThrows(IllegalArgumentException::class.java) { CatalogClient("http://example.org", "ua") }
+    }
+
+    @Test
+    fun `a lookup sends only ids the catalog takes, in chunks of a hundred, and keeps only what it asked for`() {
+        val ids = (1..150).map { "org.example.p$it" } + listOf("org.example.p1", "+plus", "-dash", ".dot", "a b", "")
+        val found = client().lookup(ids)
+
+        assertEquals((1..150).map { "org.example.p$it" }, found.map { it.packageId })
+        assertEquals(2, lookups.size)
+        assertEquals("ids=" + (1..100).joinToString(",") { "org.example.p$it" }, lookups[0])
+        assertEquals(Verdict.INSTALLABLE, found.first().verdict)
+        assertEquals("2.0", found.first().latestVersion)
+    }
+
+    @Test
+    fun `a lookup keeps its URLs short whatever the length of the ids`() {
+        val ids = (1..100).map { "%03d".format(it) + "x".repeat(125) }
+        assertEquals(ids, client().lookup(ids).map { it.packageId })
+        assertEquals(3, lookups.size)
+        assertTrue(lookups.all { it.length <= 6_004 }, lookups.map { it.length }.toString())
+    }
+
+    @Test
+    fun `a lookup of nothing asks nothing`() {
+        assertEquals(emptyList<PackageSummary>(), client().lookup(listOf("+plus")))
+        assertTrue(lookups.isEmpty())
     }
 }

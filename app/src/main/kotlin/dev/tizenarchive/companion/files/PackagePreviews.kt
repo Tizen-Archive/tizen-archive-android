@@ -47,22 +47,24 @@ internal class PreviewLoader(private val context: Context) : PackagePreviews {
 
     private fun read(file: File): PackagePreview {
         val info = TizenPackageReader.read(file)
-        val icon = TizenPackageReader.readIcon(file, info)?.let(::decode)
+        val icon = TizenPackageReader.readIcon(file, info)?.let(::decodeIcon)
         return PackagePreview(info.displayName, info.packageId, info.version, info.kind.extension, icon, SignatureInspector.inspect(file))
     }
 
-    private fun decode(bytes: ByteArray): ImageBitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= ICON_PX && bounds.outHeight / (sample * 2) >= ICON_PX) sample *= 2
-        val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
-    }
-
     private companion object {
-        const val ICON_PX = 96
         const val SMALL_COPY_LIMIT = 8L * 1024 * 1024
     }
+}
+
+private const val ICON_PX = 96
+
+/** An icon scaled down near the size it is shown at, whatever the size the file claims; blocks, so not for the main thread. */
+internal fun decodeIcon(bytes: ByteArray): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= ICON_PX && bounds.outHeight / (sample * 2) >= ICON_PX) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }

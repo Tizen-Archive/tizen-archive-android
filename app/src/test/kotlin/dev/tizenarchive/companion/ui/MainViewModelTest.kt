@@ -53,6 +53,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -962,6 +963,162 @@ class MainViewModelTest {
         vm.askWatchRemoval(pkg("com.mine"))
         assertTrue(vm.state.value.watchRemoval is WatchRemoval.Confirm)
         assertTrue(watch.removed.isEmpty())
+    }
+
+    private fun added(id: String, version: String = "1.0", icon: String? = null) =
+        WatchPackage(id, id, version, "tpk", dev.tizenarchive.companion.sdb.PackageOrigin.ADDED, dev.tizenarchive.companion.sdb.WatchPackageKind.APP, icon)
+
+    private fun builtIn(id: String) = WatchPackage(id, id, "1.0", "tpk", dev.tizenarchive.companion.sdb.PackageOrigin.BUILT_IN)
+
+    @Test
+    fun `packages the watch calls added can be removed even when another app installed them`() {
+        watch.listed = WatchListOutcome.Listed(listOf(added("com.store"), builtIn("com.samsung.clock")))
+        val vm = viewModel(folder = null)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.refreshWatchList()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.askWatchRemoval(builtIn("com.samsung.clock"))
+        assertEquals(null, vm.state.value.watchRemoval)
+        vm.askWatchRemoval(added("com.store"))
+        assertTrue(vm.state.value.watchRemoval is WatchRemoval.Confirm)
+    }
+
+    private fun vmWithList(vararg packages: WatchPackage): MainViewModel {
+        watch.listed = WatchListOutcome.Listed(packages.toList())
+        val vm = viewModel(folder = null)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        vm.refreshWatchList()
+        dispatcher.scheduler.advanceUntilIdle()
+        return vm
+    }
+
+    private fun summary(id: String, latest: String, verdict: Verdict = Verdict.INSTALLABLE) = dev.tizenarchive.companion.catalog.PackageSummary(id, id, latest, verdict)
+
+    @Test
+    fun `a loaded list fetches the icons of added packages and tells the catalog nothing until asked`() {
+        watch.iconFiles["/opt/usr/globalapps/com.store/icon.png"] = byteArrayOf(1, 2)
+        catalog.summaries["com.store"] = summary("com.store", "2.0")
+        val vm = vmWithList(added("com.store", icon = "/opt/usr/globalapps/com.store/icon.png"), added("com.noicon"), builtIn("com.samsung.clock"))
+
+        assertTrue(catalog.lookups.isEmpty())
+        assertEquals(WatchCatalogState.Idle, vm.state.value.watchCatalog)
+        assertEquals(listOf(mapOf("com.store" to "/opt/usr/globalapps/com.store/icon.png")), watch.iconRequests)
+        assertEquals(listOf<Byte>(1, 2), vm.state.value.watchIcons.getValue("com.store").toList())
+
+        vm.compareWithCatalog()
+        dispatcher.scheduler.advanceUntilIdle()
+        // Firmware is not asked about
+        assertEquals(listOf(listOf("com.store", "com.noicon")), catalog.lookups)
+        assertEquals(setOf("com.store"), (vm.state.value.watchCatalog as WatchCatalogState.Done).found.keys)
+
+        // Icons already there are not fetched again, and the answer was about the old list
+        vm.refreshWatchList()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, watch.iconRequests.size)
+        assertEquals(WatchCatalogState.Idle, vm.state.value.watchCatalog)
+    }
+
+    @Test
+    fun `a failed comparison is reported and does not hide the list`() {
+        catalog.lookupFailure = dev.tizenarchive.companion.catalog.CatalogException(dev.tizenarchive.companion.catalog.CatalogError.NETWORK, "down")
+        val vm = vmWithList(added("com.store"))
+        vm.compareWithCatalog()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(WatchCatalogState.Failed(dev.tizenarchive.companion.catalog.CatalogError.NETWORK), vm.state.value.watchCatalog)
+        assertTrue(vm.state.value.watchList is WatchListState.Loaded)
+    }
+
+    @Test
+    fun `no icon session starts while an install holds the watch`() {
+        catalog.versions["com.b"] = remoteVersion("com.b")
+        catalog.payload = tizenPackage("com.b", "2.0")
+        val vm = vmWithList()
+        vm.onInstallLink("tizen-archive://install?package=com.b")
+        dispatcher.scheduler.advanceUntilIdle()
+        watch.listed = WatchListOutcome.Listed(listOf(added("com.store", icon = "/opt/usr/globalapps/com.store/icon.png")))
+        watch.listGate = kotlinx.coroutines.CompletableDeferred()
+        watch.gate = kotlinx.coroutines.CompletableDeferred()
+        vm.refreshWatchList()
+        dispatcher.scheduler.runCurrent()
+        vm.confirmRemote()
+        dispatcher.scheduler.runCurrent()
+        watch.listGate!!.complete(Unit)
+        dispatcher.scheduler.runCurrent()
+        assertTrue(watch.iconRequests.isEmpty())
+        watch.gate!!.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `stopping a capture that waits for the icon session does not leave it running`() {
+        val vm = viewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.wifi()
+        watch.iconGate = kotlinx.coroutines.CompletableDeferred()
+        watch.listed = WatchListOutcome.Listed(listOf(added("com.store", icon = "/opt/usr/globalapps/com.store/icon.png")))
+        vm.refreshWatchList()
+        dispatcher.scheduler.runCurrent()
+        vm.startCapture()
+        dispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value.capture.running)
+        vm.stopCapture()
+        dispatcher.scheduler.runCurrent()
+        assertFalse(vm.state.value.capture.running)
+        watch.iconGate!!.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, watch.captures)
+    }
+
+    @Test
+    fun `an update the catalog stopped offering says why`() {
+        catalog.summaries["com.b"] = summary("com.b", "2.0")
+        val vm = vmWithList(added("com.b", "1.0"))
+        vm.compareWithCatalog()
+        dispatcher.scheduler.advanceUntilIdle()
+        catalog.versions["com.b"] = remoteVersion("com.b").copy(builds = listOf(Build(Verdict.EXPIRED, emptyList())))
+
+        vm.updateOnWatch(added("com.b", "1.0"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(ItemState.NotInstallable(dev.tizenarchive.companion.catalog.NotInstallableReason.EXPIRED), vm.state.value.states[watchKey("com.b")])
+        assertTrue(watch.calls.isEmpty())
+    }
+
+    @Test
+    fun `an update on the watch downloads the newer version, installs it and updates the list`() {
+        catalog.summaries["com.b"] = summary("com.b", "2.0")
+        catalog.versions["com.b"] = remoteVersion("com.b")
+        catalog.payload = tizenPackage("com.b", "2.0")
+        val vm = vmWithList(added("com.b", "1.0"))
+        vm.compareWithCatalog()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.updateOnWatch(added("com.b", "1.0"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, watch.calls.size)
+        assertEquals(ItemState.InstalledOnWatch, vm.state.value.states[watchKey("com.b")])
+        assertEquals("2.0", (vm.state.value.watchList as WatchListState.Loaded).packages.single().version)
+        assertEquals(listOf("com.b"), vm.state.value.remembered.map { it.id })
+        assertFalse(vm.state.value.installing)
+    }
+
+    @Test
+    fun `no update is started without a newer installable version`() {
+        catalog.summaries["com.b"] = summary("com.b", "2.0")
+        catalog.summaries["com.c"] = summary("com.c", "3.0", Verdict.NOT_INSTALLABLE)
+        val vm = vmWithList(added("com.b", "2.0"), added("com.c", "1.0"))
+        vm.compareWithCatalog()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.updateOnWatch(added("com.b", "2.0"))
+        vm.updateOnWatch(added("com.c", "1.0"))
+        vm.updateOnWatch(added("com.unknown", "1.0"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(watch.calls.isEmpty())
+        assertFalse(vm.state.value.installing)
     }
 
     @Test

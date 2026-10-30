@@ -85,7 +85,14 @@ internal interface WatchGateway {
         progress: (InstallProgress) -> Unit,
     ): WatchOutcome
 
+    /** The watch's packages with where they came from, what they are and where their icons lie, as far as the watch tells. */
     suspend fun list(address: InetAddress): WatchListOutcome
+
+    /**
+     * The icons at [paths] (package id to the path the list reported), in one session; icons the watch cannot give are left out, and
+     * a broken connection ends the call with what was read so far.
+     */
+    suspend fun icons(address: InetAddress, paths: Map<String, String>): Map<String, ByteArray>
 
     /** Removes a package; the application's data on the watch is lost. */
     suspend fun remove(address: InetAddress, packageId: String): WatchRemoveOutcome
