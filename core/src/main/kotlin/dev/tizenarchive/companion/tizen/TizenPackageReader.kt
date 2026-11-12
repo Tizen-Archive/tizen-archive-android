@@ -9,6 +9,7 @@ import javax.xml.parsers.SAXParserFactory
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.SAXException
+import org.xml.sax.ext.DefaultHandler2
 import org.xml.sax.helpers.DefaultHandler
 
 /** Reads package id, version and name from a `.wgt`/`.tpk`; the type comes from the content, not the file name. */
@@ -97,7 +98,7 @@ public object TizenPackageReader {
                 depth--
             }
         }
-        parse(xml, handler, namespaceAware = true)
+        parse(xml, handler)
         val id = handler.packageId?.trim().orEmpty()
         if (id.isEmpty()) throw InvalidTizenPackageException("tizen-manifest.xml has no package id")
         return TizenPackageInfo(TizenPackageKind.TPK, id, handler.version, handler.label, handler.icon?.let { "shared/res/$it" })
@@ -137,25 +138,43 @@ public object TizenPackageReader {
                 depth--
             }
         }
-        parse(xml, handler, namespaceAware = true)
+        parse(xml, handler)
         val id = handler.packageId?.trim().orEmpty()
         if (id.isEmpty()) throw InvalidTizenPackageException("config.xml has no tizen:application package id")
         return TizenPackageInfo(TizenPackageKind.WGT, id, handler.version, handler.name, handler.icon)
     }
 
-    private fun parse(xml: ByteArray, handler: DefaultHandler, namespaceAware: Boolean) {
-        // Some XML parsers (notably on Android) reject hardening features, so DTDs are refused up front.
-        val head = String(xml, Charsets.ISO_8859_1)
-        if (head.contains("<!DOCTYPE", ignoreCase = true) || head.contains("<!ENTITY", ignoreCase = true)) {
-            throw InvalidTizenPackageException("Manifest contains a DTD")
-        }
+    private fun parse(xml: ByteArray, handler: DefaultHandler) {
         try {
-            val factory = SAXParserFactory.newInstance().apply { isNamespaceAware = namespaceAware }
-            factory.newSAXParser().parse(InputSource(xml.inputStream()), handler)
+            // Fail closed if the selected XML implementation cannot disable external entities or report DTDs.
+            // The lexical callback sees declarations after the parser has decoded the document's encoding.
+            val factory = SAXParserFactory.newInstance().apply {
+                isNamespaceAware = true
+                setFeature("http://xml.org/sax/features/external-general-entities", false)
+                setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            }
+            val reader = factory.newSAXParser().xmlReader
+            // Android's Expat SAX reader supports these SAX features and lexical-handler, but not the
+            // Apache/JAXP-specific DOCTYPE and ACCESS_EXTERNAL_* controls used by desktop parsers.
+            // Reject DTDs at the parser callback so the check works for UTF-8, UTF-16, and other encodings.
+            reader.setFeature("http://xml.org/sax/features/external-general-entities", false)
+            reader.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            reader.setProperty("http://xml.org/sax/properties/lexical-handler", object : DefaultHandler2() {
+                override fun startDTD(name: String?, publicId: String?, systemId: String?) {
+                    throw SAXException("DOCTYPE declarations are not allowed")
+                }
+            })
+            reader.entityResolver = org.xml.sax.EntityResolver { _, _ ->
+                throw SAXException("External XML entities are not allowed")
+            }
+            reader.contentHandler = handler
+            reader.errorHandler = handler
+            reader.parse(InputSource(xml.inputStream()))
         } catch (e: SAXException) {
-            throw InvalidTizenPackageException("Manifest is not well-formed XML", e)
-        } catch (e: IOException) {
-            throw InvalidTizenPackageException("Cannot parse the manifest", e)
+            throw InvalidTizenPackageException("Manifest is not well-formed or uses forbidden XML features", e)
+        } catch (e: Exception) {
+            // Unsupported security features/properties must never cause a fallback to an insecure parser.
+            throw InvalidTizenPackageException("Cannot securely configure the XML parser", e)
         }
     }
 
